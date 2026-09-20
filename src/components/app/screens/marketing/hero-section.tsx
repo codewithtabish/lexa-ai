@@ -1,3 +1,4 @@
+// src/components/app/screens/landing/hero-section.tsx
 "use client";
 
 import Image from "next/image";
@@ -45,7 +46,8 @@ export default function HeroSection() {
   return (
     <section className="relative w-full">
       {/* ========== TOP HERO ========== */}
-      <div className="pt-8 pb-12 sm:pt-10 sm:pb-14 lg:pt-12 lg:pb-16">
+      {/* 🔽 Proper top padding so it doesn't touch the navbar */}
+      <div className="pt-24 pb-12 sm:pt-28 sm:pb-14 lg:pt-32 lg:pb-16">
         <div className="grid lg:grid-cols-2 gap-10 lg:gap-14 items-center">
           {/* LEFT CONTENT */}
           <motion.div
@@ -77,12 +79,12 @@ export default function HeroSection() {
               on signup — no credit card required.
             </p>
 
-            <div className="flex flex-col sm:flex-row gap-3 pt-1">
+            <div className="flex flex-col sm:flex-row gap-3 pt-1 w-full sm:w-auto">
               {isSignedIn ? (
                 <Button
                   asChild
                   size="lg"
-                  className="h-11 px-6 text-base font-semibold rounded-full"
+                  className="h-11 px-6 text-base font-semibold rounded-full w-full sm:w-auto"
                 >
                   <Link href="/dashboard">
                     Open App
@@ -93,7 +95,7 @@ export default function HeroSection() {
                 <SignUpButton mode="modal">
                   <Button
                     size="lg"
-                    className="h-11 px-6 text-base font-semibold rounded-full"
+                    className="h-11 px-6 text-base font-semibold rounded-full w-full sm:w-auto"
                   >
                     Get Started Free
                     <span className="ml-2">→</span>
@@ -105,7 +107,7 @@ export default function HeroSection() {
                 asChild
                 size="lg"
                 variant="outline"
-                className="h-11 px-6 text-base font-medium rounded-full"
+                className="h-11 px-6 text-base font-medium rounded-full w-full sm:w-auto"
               >
                 <Link href="/pricing">See Pricing</Link>
               </Button>

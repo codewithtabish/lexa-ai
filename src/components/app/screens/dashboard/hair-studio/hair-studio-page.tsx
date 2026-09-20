@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";  // 🆕 ADD THIS
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Upload,
@@ -74,7 +74,7 @@ async function downloadImage(imageUrl: string, filename: string) {
 // ============================================
 
 export default function HairStudioPage() {
-  const router = useRouter();  // 🆕
+  const router = useRouter();
 
   // ─── Selection ────────────────────────────
   const [selectedStyle, setSelectedStyle] = React.useState<HairTemplate | null>(null);
@@ -97,7 +97,6 @@ export default function HairStudioPage() {
   const [resultImage, setResultImage] = React.useState<string | null>(null);
   const [isDownloading, setIsDownloading] = React.useState(false);
 
-  // 🆕 Trigger a refresh of user data (credits) in HairStudioBack
   const [userDataRefreshKey, setUserDataRefreshKey] = React.useState(0);
 
   // ─── Cleanup preview URL ──────────────────
@@ -217,16 +216,12 @@ export default function HairStudioPage() {
             clearInterval(interval);
             setResultImage(statusResult.imageUrl);
             setIsGenerating(false);
-
-            // 🆕 Trigger credits refresh + page refresh
             setUserDataRefreshKey((k) => k + 1);
             router.refresh();
           } else if (statusResult.status === "FAILED") {
             clearInterval(interval);
             setError("Generation failed. Your credit was not charged.");
             setIsGenerating(false);
-
-            // 🆕 Also refresh on failure (in case anything changed)
             setUserDataRefreshKey((k) => k + 1);
             router.refresh();
           }
@@ -270,7 +265,6 @@ export default function HairStudioPage() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      {/* 🆕 Pass refreshKey so credits re-fetch after generation */}
       <HairStudioBack refreshKey={userDataRefreshKey} />
       <HairStudioHeader />
 
@@ -398,9 +392,7 @@ export default function HairStudioPage() {
         </div>
       </div>
 
-      {/* ═══════════════════════════════════════════
-          GENERATING OVERLAY
-          ═══════════════════════════════════════════ */}
+      {/* GENERATING OVERLAY */}
       <AnimatePresence>
         {isGenerating && (
           <motion.div
@@ -464,9 +456,7 @@ export default function HairStudioPage() {
         )}
       </AnimatePresence>
 
-      {/* ═══════════════════════════════════════════
-          RESULT OVERLAY
-          ═══════════════════════════════════════════ */}
+      {/* RESULT OVERLAY */}
       <AnimatePresence>
         {resultImage && (
           <motion.div
@@ -555,9 +545,7 @@ export default function HairStudioPage() {
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setResultImage(null);
-                  }}
+                  onClick={() => setResultImage(null)}
                   className={cn(
                     "group inline-flex flex-1 items-center justify-center gap-2 rounded-full px-6 py-3.5",
                     "border border-white/20 bg-white/5 text-white backdrop-blur-md",
@@ -635,7 +623,7 @@ function StepCard({
 }
 
 // ═══════════════════════════════════════════
-// PHOTO UPLOAD ZONE
+// PHOTO UPLOAD ZONE — FULLY FIXED
 // ═══════════════════════════════════════════
 
 function PhotoUploadZone({
@@ -774,7 +762,7 @@ function PhotoUploadZone({
     );
   }
 
-  // ─── FILLED STATE ─────────────────────────
+  // ─── FILLED STATE — FIXED: image is absolutely positioned ────
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
@@ -788,15 +776,17 @@ function PhotoUploadZone({
         "select-none"
       )}
     >
-      <div className="relative aspect-square w-full overflow-hidden">
+      {/* ─── FIXED: Fixed square container, image absolutely positioned ─── */}
+      <div className="relative w-full" style={{ aspectRatio: "1 / 1" }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={previewUrl}
           alt="Your uploaded photo"
           draggable={false}
-          className="pointer-events-none h-full w-full object-contain p-2 select-none"
+          className="absolute inset-0 h-full w-full object-contain p-3 select-none pointer-events-none"
         />
 
+        {/* UPLOADING OVERLAY */}
         <AnimatePresence>
           {isUploading && (
             <motion.div
@@ -827,6 +817,7 @@ function PhotoUploadZone({
           )}
         </AnimatePresence>
 
+        {/* SUCCESS OVERLAY */}
         <AnimatePresence>
           {uploadSuccess && !isUploading && (
             <motion.div
@@ -848,6 +839,7 @@ function PhotoUploadZone({
           )}
         </AnimatePresence>
 
+        {/* REMOVE BUTTON */}
         <button
           type="button"
           onClick={onRemove}
@@ -866,6 +858,7 @@ function PhotoUploadZone({
         </button>
       </div>
 
+      {/* ─── File info bar (below image) ─── */}
       <div
         className={cn(
           "flex flex-col gap-1.5 border-t px-3 py-2.5",
