@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "prisma generate"
+
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1136.0",
