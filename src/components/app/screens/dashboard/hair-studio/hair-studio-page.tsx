@@ -614,7 +614,7 @@ function StepCard({
 }
 
 // ═══════════════════════════════════════════
-// PHOTO UPLOAD ZONE — COMPACT, LAYOUT-SAFE
+// PHOTO UPLOAD ZONE — WITH GUIDANCE
 // ═══════════════════════════════════════════
 
 function PhotoUploadZone({
@@ -734,6 +734,25 @@ function PhotoUploadZone({
           >
             JPG · PNG · HEIC · Max 10MB
           </p>
+
+          {/* 🆕 Best Results guidance */}
+          <div
+            className={cn(
+              "mt-2 w-full max-w-[280px] rounded-xl border p-2.5 text-left",
+              "border-[#D18A4A]/20 bg-[#FDF4EB]/40",
+              "dark:border-[#D99A5B]/20 dark:bg-[#33312D]/40"
+            )}
+          >
+            <p className="flex items-center gap-1.5 text-[10.5px] font-bold text-[#D18A4A] dark:text-[#D99A5B]">
+              <Sparkles className="size-3" strokeWidth={2.5} />
+              Best Results
+            </p>
+            <ul className="mt-1.5 flex flex-col gap-0.5 text-[10px] leading-relaxed text-[#8B8478] dark:text-[#B5B0A5]">
+              <li>• Use a clear, front-facing selfie</li>
+              <li>• Good lighting (no shadows on face)</li>
+              <li>• No screenshots or heavily filtered photos</li>
+            </ul>
+          </div>
 
           <div
             className={cn(

@@ -6,6 +6,7 @@ import { startTask, checkTaskStatus } from "@/lib/youcam/client";
 import { revalidateUserData } from "@/lib/revalidate-user";
 import { getFeatureCost } from "@/lib/youcam/feature-costs";
 import prisma from "@/lib/prisma-client";
+import { uploadYouCamResult } from "@/lib/images/upload-youcam-result";
 
 // ═══════════════════════════════════════════════════════════
 // 🎯 TWO SEPARATE COSTS
@@ -179,14 +180,19 @@ export async function checkHairStyleStatus({
     }
 
     if (youCamResult.status === "success") {
-      const finalImageUrl =
+      // ─── Extract YouCam's TEMPORARY URL (expires in 2h) ───
+      const youCamTempUrl =
         youCamResult.results?.image_url ||
         youCamResult.results?.url ||
         (Array.isArray(youCamResult.results)
           ? youCamResult.results[0]?.url
           : null);
 
-      if (!finalImageUrl) {
+      if (!youCamTempUrl) {
+        console.error(
+          "[checkHairStyleStatus] No image URL in results:",
+          youCamResult.results
+        );
         await prisma.creation.update({
           where: { id: creation.id },
           data: { status: "FAILED" },
@@ -194,14 +200,55 @@ export async function checkHairStyleStatus({
         return { success: true, status: "FAILED" };
       }
 
+      // ═══════════════════════════════════════════════════
+      // 🎯 CRITICAL: Download from YouCam + Upload to OUR S3
+      // YouCam URL expires in 2 hours — we save OUR CloudFront URL
+      // ═══════════════════════════════════════════════════
+      let permanentUrl: string;
+
+      try {
+        const fileName = creation.originalImageUrl
+          ? creation.originalImageUrl.split("/").pop()?.split(".")[0]
+          : "hairstyle";
+
+        const uploaded = await uploadYouCamResult({
+          youCamUrl: youCamTempUrl,
+          fileName: fileName || "hairstyle",
+          feature: "hair-styles",
+        });
+
+        permanentUrl = uploaded.url;
+
+        console.log(
+          `[checkHairStyleStatus] ✅ Re-uploaded to our S3: ${permanentUrl}`
+        );
+      } catch (uploadErr: any) {
+        console.error(
+          "[checkHairStyleStatus] S3 re-upload failed:",
+          uploadErr.message
+        );
+
+        // ⚠️ Fallback: Save YouCam URL anyway
+        // Better than nothing (it will work for 2h)
+        permanentUrl = youCamTempUrl;
+        console.warn(
+          "[checkHairStyleStatus] ⚠️ Using temporary YouCam URL as fallback"
+        );
+      }
+
+      // ─── Save result to DB with PERMANENT URL ───
       await prisma.creation.update({
         where: { id: creation.id },
         data: {
           status: "COMPLETED",
-          imageUrl: finalImageUrl,
+          imageUrl: permanentUrl, // ✅ Our CloudFront URL
           metadata: {
             ...((creation.metadata as object) || {}),
             youcamResult: youCamResult.results,
+            youcamOriginalUrl: youCamTempUrl, // Keep for debug
+            reuploadedToS3: permanentUrl.startsWith(
+              process.env.AWS_CLOUDFRONT_URL || "https://"
+            ),
           },
         },
       });
@@ -232,7 +279,7 @@ export async function checkHairStyleStatus({
       return {
         success: true,
         status: "COMPLETED",
-        imageUrl: finalImageUrl,
+        imageUrl: permanentUrl,
       };
     }
 
