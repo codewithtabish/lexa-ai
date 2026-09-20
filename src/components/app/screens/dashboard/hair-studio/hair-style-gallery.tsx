@@ -137,7 +137,7 @@ export function HairStyleGallery({
   }, [templates, activeTab, genderFilter, searchQuery]);
 
   return (
-    <section className="flex w-full flex-col gap-5">
+    <section className="flex w-full flex-col gap-4 sm:gap-5">
       {/* ═══════════════════════════════════════════
           TOP ROW — Tabs + Gender + Search + View
           ═══════════════════════════════════════════ */}
@@ -147,8 +147,8 @@ export function HairStyleGallery({
           {/* Category tabs */}
           <div
             className={cn(
-              "flex flex-wrap items-center gap-1.5",
-              "rounded-2xl border p-1.5 sm:rounded-full",
+              "flex items-center gap-1 overflow-x-auto scrollbar-hide",
+              "rounded-full border p-1 sm:p-1.5",
               "border-[#E5E0D5] bg-[#FCFBF7]/80 backdrop-blur-sm",
               "dark:border-[#4A473F] dark:bg-[#262421]/80",
               "w-full sm:w-fit"
@@ -162,8 +162,8 @@ export function HairStyleGallery({
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
-                    "relative shrink-0 rounded-full px-4 py-2",
-                    "text-[12.5px] font-semibold tracking-tight",
+                    "relative shrink-0 rounded-full px-3.5 py-1.5 sm:px-4 sm:py-2",
+                    "text-[12px] sm:text-[12.5px] font-semibold tracking-tight",
                     "transition-all duration-300 whitespace-nowrap",
                     "flex-1 sm:flex-initial",
                     isActive
@@ -383,13 +383,13 @@ export function HairStyleGallery({
       )}
 
       {/* ═══════════════════════════════════════════
-          GRID VIEW
+          GRID VIEW — 🆕 2 columns on mobile
           ═══════════════════════════════════════════ */}
       {viewMode === "grid" && filteredTemplates.length > 0 && (
         <div
           className={cn(
-            "grid gap-4 sm:gap-5",
-            "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+            "grid gap-3 sm:gap-4 md:gap-5",
+            "grid-cols-2 sm:grid-cols-2 md:grid-cols-3"
           )}
         >
           <AnimatePresence mode="popLayout">
@@ -462,7 +462,7 @@ function HairStyleGridCard({
       onClick={onSelect}
       className={cn(
         "group relative aspect-[4/5] w-full overflow-hidden text-left",
-        "rounded-3xl border",
+        "rounded-2xl sm:rounded-3xl border",
         "transition-all duration-300",
         "hover:-translate-y-1",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D18A4A]",
@@ -486,11 +486,11 @@ function HairStyleGridCard({
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/90 via-black/50 to-transparent" />
 
-      <div className="absolute inset-x-0 bottom-0 p-4">
-        <p className="line-clamp-1 text-[15px] font-bold leading-tight text-white">
+      <div className="absolute inset-x-0 bottom-0 p-2.5 sm:p-4">
+        <p className="line-clamp-1 text-[13px] sm:text-[15px] font-bold leading-tight text-white">
           {template.title}
         </p>
-        <p className="mt-1 line-clamp-1 text-[11.5px] font-medium capitalize text-white/80">
+        <p className="mt-0.5 sm:mt-1 line-clamp-1 text-[10px] sm:text-[11.5px] font-medium capitalize text-white/80">
           {subtitle}
         </p>
       </div>
@@ -499,7 +499,7 @@ function HairStyleGridCard({
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="pointer-events-none absolute inset-0 rounded-3xl ring-2 ring-inset ring-[#D18A4A] dark:ring-[#D99A5B]"
+          className="pointer-events-none absolute inset-0 rounded-2xl sm:rounded-3xl ring-2 ring-inset ring-[#D18A4A] dark:ring-[#D99A5B]"
         />
       )}
 
@@ -511,13 +511,13 @@ function HairStyleGridCard({
             exit={{ opacity: 0, scale: 0.5 }}
             transition={{ type: "spring", stiffness: 500, damping: 25 }}
             className={cn(
-              "absolute right-3 top-3 z-10",
-              "flex size-7 items-center justify-center rounded-full",
+              "absolute right-2 top-2 sm:right-3 sm:top-3 z-10",
+              "flex size-6 sm:size-7 items-center justify-center rounded-full",
               "bg-gradient-to-br from-[#D99A5B] to-[#B86F32]",
               "shadow-[0_4px_16px_rgba(217,154,91,0.6)]"
             )}
           >
-            <Check className="size-4 text-white" strokeWidth={3.5} />
+            <Check className="size-3.5 sm:size-4 text-white" strokeWidth={3.5} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -558,7 +558,7 @@ function HairStyleListCard({
       }}
       onClick={onSelect}
       className={cn(
-        "group flex w-full items-center gap-4 rounded-2xl border p-3 text-left",
+        "group flex w-full items-center gap-3 sm:gap-4 rounded-2xl border p-2.5 sm:p-3 text-left",
         "transition-all duration-200",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D18A4A]",
         "focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F7F2]",
@@ -579,17 +579,17 @@ function HairStyleListCard({
     >
       <div
         className={cn(
-          "relative size-20 shrink-0 overflow-hidden rounded-2xl",
+          "relative size-16 sm:size-20 shrink-0 overflow-hidden rounded-xl sm:rounded-2xl",
           "border border-[#E5E0D5] dark:border-[#4A473F]"
         )}
       >
         <HairStyleImage src={template.thumb} alt={template.title} />
       </div>
 
-      <div className="flex flex-1 flex-col">
+      <div className="flex flex-1 flex-col min-w-0">
         <p
           className={cn(
-            "line-clamp-1 text-[15px] font-bold tracking-tight",
+            "line-clamp-1 text-[14px] sm:text-[15px] font-bold tracking-tight",
             "text-[#2E2A24] dark:text-[#F7F5F0]"
           )}
         >
@@ -597,7 +597,7 @@ function HairStyleListCard({
         </p>
         <p
           className={cn(
-            "mt-1 line-clamp-1 text-[12px] font-medium capitalize",
+            "mt-0.5 sm:mt-1 line-clamp-1 text-[11px] sm:text-[12px] font-medium capitalize",
             "text-[#8B8478] dark:text-[#B5B0A5]"
           )}
         >
@@ -607,13 +607,13 @@ function HairStyleListCard({
 
       <div
         className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-full transition-all duration-200",
+          "flex size-7 sm:size-8 shrink-0 items-center justify-center rounded-full transition-all duration-200",
           isSelected
             ? "bg-gradient-to-br from-[#D99A5B] to-[#B86F32] text-white shadow-[0_4px_12px_rgba(217,154,91,0.4)]"
             : "border border-[#E5E0D5] text-transparent dark:border-[#4A473F]"
         )}
       >
-        <Check className="size-4" strokeWidth={3.5} />
+        <Check className="size-3.5 sm:size-4" strokeWidth={3.5} />
       </div>
     </motion.button>
   );

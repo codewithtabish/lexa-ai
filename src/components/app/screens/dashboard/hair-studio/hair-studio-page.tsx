@@ -76,10 +76,8 @@ async function downloadImage(imageUrl: string, filename: string) {
 export default function HairStudioPage() {
   const router = useRouter();
 
-  // ─── Selection ────────────────────────────
   const [selectedStyle, setSelectedStyle] = React.useState<HairTemplate | null>(null);
 
-  // ─── Upload ───────────────────────────────
   const [uploadedFile, setUploadedFile] = React.useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const [uploadedUrl, setUploadedUrl] = React.useState<string | null>(null);
@@ -88,25 +86,21 @@ export default function HairStudioPage() {
   const [uploadSuccess, setUploadSuccess] = React.useState(false);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
 
-  // ─── Generation ───────────────────────────
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [generatingStatus, setGeneratingStatus] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
 
-  // ─── Result ───────────────────────────────
   const [resultImage, setResultImage] = React.useState<string | null>(null);
   const [isDownloading, setIsDownloading] = React.useState(false);
 
   const [userDataRefreshKey, setUserDataRefreshKey] = React.useState(0);
 
-  // ─── Cleanup preview URL ──────────────────
   React.useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
 
-  // ─── Rotating loading messages ────────────
   React.useEffect(() => {
     if (!isGenerating) {
       setGeneratingStatus("");
@@ -124,7 +118,6 @@ export default function HairStudioPage() {
     return () => clearInterval(interval);
   }, [isGenerating]);
 
-  // ─── Handle file select + upload ──────────
   const handleFileSelect = async (file: File) => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
 
@@ -172,7 +165,6 @@ export default function HairStudioPage() {
     setError(null);
   };
 
-  // ─── Handle generate ──────────────────────
   const handleGenerate = async () => {
     if (!uploadedUrl || !selectedStyle) return;
 
@@ -236,7 +228,6 @@ export default function HairStudioPage() {
     }
   };
 
-  // ─── Handle download ──────────────────────
   const handleDownload = async () => {
     if (!resultImage) return;
 
@@ -592,13 +583,13 @@ function StepCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       className={cn(
-        "flex flex-col rounded-3xl border p-5",
+        "flex flex-col rounded-3xl border p-4 sm:p-5",
         "border-[#E5E0D5] bg-[#FCFBF7]",
         "dark:border-[#4A473F] dark:bg-[#262421]",
         "shadow-[0_2px_8px_rgba(0,0,0,0.02)]"
       )}
     >
-      <div className="mb-4 flex items-center gap-2.5">
+      <div className="mb-3 sm:mb-4 flex items-center gap-2.5">
         <div
           className={cn(
             "flex size-7 shrink-0 items-center justify-center rounded-full",
@@ -699,7 +690,7 @@ function PhotoUploadZone({
           onKeyDown={(e) => e.key === "Enter" && handleClick()}
           className={cn(
             "group flex cursor-pointer flex-col items-center justify-center gap-3",
-            "rounded-2xl border-2 border-dashed p-6 text-center",
+            "rounded-2xl border-2 border-dashed p-5 sm:p-6 text-center",
             "transition-all duration-300",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D18A4A]",
             isDragging
@@ -762,28 +753,39 @@ function PhotoUploadZone({
     );
   }
 
-  // ─── FILLED STATE — FIXED: image is absolutely positioned ────
+  // ─── FILLED STATE — Fixed image preview ────
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.3 }}
       className={cn(
-        "group relative flex w-full flex-col overflow-hidden rounded-2xl",
+        "flex w-full flex-col overflow-hidden rounded-2xl",
         "border border-[#E5E0D5] dark:border-[#4A473F]",
-        "bg-gradient-to-br from-[#FDF4EB] via-[#F7F7F2] to-[#FDF4EB]",
-        "dark:from-[#33312D] dark:via-[#2A2825] dark:to-[#33312D]",
-        "select-none"
+        "bg-[#FCFBF7] dark:bg-[#262421]"
       )}
     >
-      {/* ─── FIXED: Fixed square container, image absolutely positioned ─── */}
-      <div className="relative w-full" style={{ aspectRatio: "1 / 1" }}>
+      {/* ─── Image preview — locked square, image doesn't stretch it ─── */}
+      <div
+        className={cn(
+          "relative w-full overflow-hidden",
+          "bg-[#F7F7F2] dark:bg-[#1A1918]",
+          "flex items-center justify-center"
+        )}
+        style={{ aspectRatio: "1 / 1", contain: "layout" }}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={previewUrl}
           alt="Your uploaded photo"
           draggable={false}
-          className="absolute inset-0 h-full w-full object-contain p-3 select-none pointer-events-none"
+          className="block max-h-full max-w-full object-contain p-3 select-none"
+          style={{
+            width: "auto",
+            height: "auto",
+            maxWidth: "calc(100% - 24px)",
+            maxHeight: "calc(100% - 24px)",
+          }}
         />
 
         {/* UPLOADING OVERLAY */}
@@ -795,7 +797,7 @@ function PhotoUploadZone({
               exit={{ opacity: 0 }}
               className={cn(
                 "absolute inset-0 z-20 flex flex-col items-center justify-center gap-3",
-                "bg-black/60 backdrop-blur-md"
+                "bg-black/70 backdrop-blur-md"
               )}
             >
               <div
@@ -817,7 +819,7 @@ function PhotoUploadZone({
           )}
         </AnimatePresence>
 
-        {/* SUCCESS OVERLAY */}
+        {/* SUCCESS BADGE */}
         <AnimatePresence>
           {uploadSuccess && !isUploading && (
             <motion.div
@@ -862,15 +864,16 @@ function PhotoUploadZone({
       <div
         className={cn(
           "flex flex-col gap-1.5 border-t px-3 py-2.5",
-          "border-[#E5E0D5] bg-[#FCFBF7]/80 backdrop-blur-sm",
-          "dark:border-[#4A473F] dark:bg-[#262421]/80"
+          "border-[#E5E0D5] bg-[#FCFBF7]",
+          "dark:border-[#4A473F] dark:bg-[#262421]"
         )}
       >
         <p
           className={cn(
-            "truncate text-[12px] font-bold tracking-tight",
+            "w-full truncate text-[11.5px] font-bold tracking-tight",
             "text-[#2E2A24] dark:text-[#F7F5F0]"
           )}
+          title={file?.name ?? "Your photo"}
         >
           {file?.name ?? "Your photo"}
         </p>
@@ -879,7 +882,7 @@ function PhotoUploadZone({
           {file && (
             <span
               className={cn(
-                "rounded-full px-2 py-0.5",
+                "inline-flex items-center rounded-full px-2 py-0.5",
                 "bg-[#E5E0D5] text-[#8B8478]",
                 "dark:bg-[#4A473F] dark:text-[#B5B0A5]"
               )}
@@ -915,7 +918,7 @@ function PhotoUploadZone({
               )}
             >
               <AlertCircle className="size-2.5" strokeWidth={3} />
-              {uploadError}
+              <span className="truncate max-w-[120px]">{uploadError}</span>
             </span>
           )}
         </div>
