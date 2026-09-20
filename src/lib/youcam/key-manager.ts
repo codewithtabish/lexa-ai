@@ -15,7 +15,7 @@ import {
 
 const TABLE_NAME = "youcam-keys";
 const ACTIVE_KEY_ID = "active";
-const MIN_CREDITS = 3; // 🔺 Raised to 3 (covers max feature cost)
+const MIN_CREDITS = 3;
 const MEMORY_CACHE_TTL = 60 * 1000;
 
 // ═══════════════════════════════════════════════════════════
@@ -44,7 +44,7 @@ let cachedKey: {
 } | null = null;
 
 // ═══════════════════════════════════════════════════════════
-// TYPES
+// TYPES — discriminated union for TS narrowing
 // ═══════════════════════════════════════════════════════════
 
 type ActiveKeyData = {
@@ -54,6 +54,19 @@ type ActiveKeyData = {
   index: number;
   updatedAt: string;
 };
+
+export type KeyResult =
+  | {
+      success: true;
+      apiKey: string;
+      remaining: number;
+      index: number;
+      updatedAt: string;
+    }
+  | {
+      success: false;
+      error: string;
+    };
 
 // ═══════════════════════════════════════════════════════════
 // HELPERS
@@ -96,7 +109,7 @@ async function fetchCredit(apiKey: string): Promise<number> {
 // GET ACTIVE KEY
 // ═══════════════════════════════════════════════════════════
 
-export async function getActiveYouCamKey() {
+export async function getActiveYouCamKey(): Promise<KeyResult> {
   // Memory cache hit
   if (
     cachedKey &&
@@ -157,10 +170,14 @@ export async function getActiveYouCamKey() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// CONSUME CREDIT — supports any cost
+// CONSUME CREDIT
 // ═══════════════════════════════════════════════════════════
 
-export async function consumeCredit(cost: number = 1) {
+export async function consumeCredit(cost: number = 1): Promise<{
+  success: boolean;
+  remaining?: number | null;
+  error?: string;
+}> {
   console.log(`[KeyManager] 🎯 Consuming ${cost} credit(s)`);
 
   try {
@@ -201,7 +218,7 @@ export async function consumeCredit(cost: number = 1) {
 // MARK EXHAUSTED
 // ═══════════════════════════════════════════════════════════
 
-export async function markKeyExhausted() {
+export async function markKeyExhausted(): Promise<KeyResult> {
   try {
     await docClient.send(
       new UpdateCommand({
@@ -229,7 +246,7 @@ export async function markKeyExhausted() {
 // REFRESH
 // ═══════════════════════════════════════════════════════════
 
-export async function refreshActiveYouCamKey() {
+export async function refreshActiveYouCamKey(): Promise<KeyResult> {
   try {
     const keys = getAllKeys();
 

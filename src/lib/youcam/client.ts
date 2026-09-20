@@ -40,13 +40,13 @@ async function getRealCredits(apiKey: string): Promise<number> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// START TASK — 3 parameters now
+// START TASK
 // ═══════════════════════════════════════════════════════════
 
 export async function startTask(
   endpoint: string,
   body: Record<string, unknown>,
-  creditCost: number = 1  // 🎯 ADD THIS PARAMETER
+  creditCost: number = 1
 ): Promise<string> {
   const MAX_RETRIES = 3;
   const requiredCredits = Math.max(creditCost, MIN_KEY_CREDITS);
@@ -57,7 +57,8 @@ export async function startTask(
     );
 
     const keyResult = await getActiveYouCamKey();
-    if (!keyResult.success || !keyResult.apiKey) {
+    if (!keyResult.success) {
+      // ✅ TypeScript now knows `error` exists here
       throw new Error(keyResult.error || "No available YouCam API key");
     }
 
@@ -124,7 +125,8 @@ export async function checkTaskStatus(
   taskId: string
 ): Promise<{ status: string; results?: any }> {
   const result = await getActiveYouCamKey();
-  if (!result.success || !result.apiKey) {
+  if (!result.success) {
+    // ✅ TypeScript now knows `error` exists here
     throw new Error(result.error || "No available YouCam API key");
   }
 
