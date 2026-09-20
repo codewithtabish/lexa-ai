@@ -46,15 +46,14 @@ export default function HeroSection() {
   return (
     <section className="relative w-full">
       {/* ========== TOP HERO ========== */}
-      {/* 🔽 Proper top padding so it doesn't touch the navbar */}
-      <div className="pt-24 pb-12 sm:pt-28 sm:pb-14 lg:pt-32 lg:pb-16">
+      <div className="pt-32 pb-12 sm:pt-36 sm:pb-14 lg:pt-40 lg:pb-16">
         <div className="grid lg:grid-cols-2 gap-10 lg:gap-14 items-center">
           {/* LEFT CONTENT */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: "easeOut" }}
-            className="flex flex-col items-start text-left space-y-5 sm:space-y-6 max-w-xl"
+            className="flex flex-col items-start text-left space-y-5 sm:space-y-6 w-full max-w-xl"
           >
             <Badge
               variant="secondary"
@@ -79,12 +78,15 @@ export default function HeroSection() {
               on signup — no credit card required.
             </p>
 
+            {/* BUTTONS */}
+            {/* Mobile: Only "Get Started Free" shows, auto-width */}
+            {/* Tablet+: Both buttons show side-by-side */}
             <div className="flex flex-col sm:flex-row gap-3 pt-1 w-full sm:w-auto">
               {isSignedIn ? (
                 <Button
                   asChild
                   size="lg"
-                  className="h-11 px-6 text-base font-semibold rounded-full w-full sm:w-auto"
+                  className="h-12 w-auto px-7 text-base font-semibold rounded-full self-start"
                 >
                   <Link href="/dashboard">
                     Open App
@@ -95,7 +97,7 @@ export default function HeroSection() {
                 <SignUpButton mode="modal">
                   <Button
                     size="lg"
-                    className="h-11 px-6 text-base font-semibold rounded-full w-full sm:w-auto"
+                    className="h-12 w-auto px-7 text-base font-semibold rounded-full self-start"
                   >
                     Get Started Free
                     <span className="ml-2">→</span>
@@ -103,11 +105,12 @@ export default function HeroSection() {
                 </SignUpButton>
               )}
 
+              {/* 🆕 Hidden on mobile, visible on tablet+ */}
               <Button
                 asChild
                 size="lg"
                 variant="outline"
-                className="h-11 px-6 text-base font-medium rounded-full w-full sm:w-auto"
+                className="h-12 hidden sm:inline-flex px-7 text-base font-medium rounded-full"
               >
                 <Link href="/pricing">See Pricing</Link>
               </Button>
@@ -230,7 +233,6 @@ export default function HeroSection() {
       {/* ========== HOW IT WORKS ========== */}
       <div className="px-4 sm:px-6 lg:px-8 pb-16 sm:pb-20">
         <div className="relative w-full bg-foreground/15 rounded-3xl overflow-hidden">
-          {/* subtle glow accents */}
           <div className="pointer-events-none absolute inset-0">
             <div className="absolute -top-24 -left-24 w-72 h-72 rounded-full bg-primary/20 blur-3xl" />
             <div className="absolute -bottom-24 -right-24 w-80 h-80 rounded-full bg-primary/15 blur-3xl" />
@@ -238,7 +240,6 @@ export default function HeroSection() {
 
           <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16 sm:py-20 lg:py-24">
             <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
-              {/* Left text */}
               <motion.div
                 initial={{ opacity: 0, x: -20 }}
                 whileInView={{ opacity: 1, x: 0 }}
@@ -264,7 +265,6 @@ export default function HeroSection() {
                 </p>
               </motion.div>
 
-              {/* Right steps */}
               <motion.div
                 initial={{ opacity: 0, x: 20 }}
                 whileInView={{ opacity: 1, x: 0 }}
@@ -277,7 +277,6 @@ export default function HeroSection() {
                     key={step.number}
                     className="flex items-start sm:items-center gap-4 sm:gap-0 sm:flex-col sm:text-center flex-1 relative"
                   >
-                    {/* Step card */}
                     <div className="flex sm:flex-col items-center gap-4 sm:gap-0 w-full">
                       <div className="relative shrink-0">
                         <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-primary/10 border border-primary/25 flex items-center justify-center">
@@ -298,7 +297,6 @@ export default function HeroSection() {
                       </div>
                     </div>
 
-                    {/* Arrow between steps (desktop) */}
                     {i < steps.length - 1 && (
                       <div className="hidden sm:flex absolute top-8 -right-3 lg:-right-4 items-center justify-center text-primary/50">
                         <ArrowRight className="w-4 h-4" />
