@@ -1,3 +1,4 @@
+// src/app/app/layout.tsx
 "use client";
 
 import * as React from "react";
@@ -12,19 +13,19 @@ export default function AppLayout({
 }) {
   return (
     <>
-      {/* ============================================
-          DASHBOARD NAVBAR — Fixed at top, z-50
-          ============================================ */}
- <React.Suspense fallback={<DashboardNavbarFallback />}>
+      <React.Suspense fallback={<DashboardNavbarFallback />}>
         <DashboardNavbar />
       </React.Suspense>
-      {/* ============================================
-          MAIN — pt-16 offsets the fixed navbar (64px)
-          Flex column layout keeps footer stuck at bottom
-          even when content is short.
-          ============================================ */}
-      <main className="flex min-h-[calc(100vh-4rem)] flex-1 flex-col pt-16">
-        <div className="flex-1">{children}</div>
+
+      <main className="flex min-h-[calc(100vh-4rem)] flex-1 flex-col">
+        {/* 🆕 Explicit spacer — guaranteed to prevent navbar overlap */}
+        <div className="h-16 shrink-0" aria-hidden="true" />
+
+        <div className="flex-1 px-4 sm:px-6 lg:px-8">
+          {children}
+        </div>
+
+        <Footer />
       </main>
     </>
   );
