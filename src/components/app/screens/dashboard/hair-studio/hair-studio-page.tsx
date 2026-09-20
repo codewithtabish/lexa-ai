@@ -589,7 +589,7 @@ function StepCard({
         "shadow-[0_2px_8px_rgba(0,0,0,0.02)]"
       )}
     >
-      <div className="mb-3 sm:mb-4 flex items-center gap-2.5">
+      <div className="mb-3 flex items-center gap-2.5 sm:mb-4">
         <div
           className={cn(
             "flex size-7 shrink-0 items-center justify-center rounded-full",
@@ -614,7 +614,7 @@ function StepCard({
 }
 
 // ═══════════════════════════════════════════
-// PHOTO UPLOAD ZONE — FULLY FIXED
+// PHOTO UPLOAD ZONE — COMPACT, LAYOUT-SAFE
 // ═══════════════════════════════════════════
 
 function PhotoUploadZone({
@@ -753,7 +753,7 @@ function PhotoUploadZone({
     );
   }
 
-  // ─── FILLED STATE — Fixed image preview ────
+  // ─── FILLED STATE — COMPACT with FIXED 180px height ────
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
@@ -765,27 +765,22 @@ function PhotoUploadZone({
         "bg-[#FCFBF7] dark:bg-[#262421]"
       )}
     >
-      {/* ─── Image preview — locked square, image doesn't stretch it ─── */}
+      {/* 🔒 Compact fixed-height container — NEVER stretches */}
       <div
         className={cn(
-          "relative w-full overflow-hidden",
-          "bg-[#F7F7F2] dark:bg-[#1A1918]",
-          "flex items-center justify-center"
+          "relative w-full flex items-center justify-center overflow-hidden",
+          "bg-gradient-to-br from-[#FDF4EB] via-[#F7F7F2] to-[#FDF4EB]",
+          "dark:from-[#33312D] dark:via-[#2A2825] dark:to-[#33312D]"
         )}
-        style={{ aspectRatio: "1 / 1", contain: "layout" }}
+        style={{ height: "180px" }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={previewUrl}
           alt="Your uploaded photo"
           draggable={false}
-          className="block max-h-full max-w-full object-contain p-3 select-none"
-          style={{
-            width: "auto",
-            height: "auto",
-            maxWidth: "calc(100% - 24px)",
-            maxHeight: "calc(100% - 24px)",
-          }}
+          className="block max-h-full max-w-full object-contain p-2 select-none pointer-events-none"
+          style={{ width: "auto", height: "auto" }}
         />
 
         {/* UPLOADING OVERLAY */}
@@ -796,25 +791,20 @@ function PhotoUploadZone({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className={cn(
-                "absolute inset-0 z-20 flex flex-col items-center justify-center gap-3",
-                "bg-black/70 backdrop-blur-md"
+                "absolute inset-0 z-20 flex flex-col items-center justify-center gap-2",
+                "bg-black/60 backdrop-blur-md"
               )}
             >
               <div
                 className={cn(
-                  "flex size-14 items-center justify-center rounded-full",
+                  "flex size-10 items-center justify-center rounded-full",
                   "bg-gradient-to-br from-[#D99A5B] to-[#B86F32]",
                   "shadow-[0_8px_24px_rgba(217,154,91,0.6)]"
                 )}
               >
-                <Loader2 className="size-6 animate-spin text-white" strokeWidth={2.5} />
+                <Loader2 className="size-5 animate-spin text-white" strokeWidth={2.5} />
               </div>
-              <p className="text-[13px] font-bold text-white">
-                Uploading your photo...
-              </p>
-              <p className="text-[11px] font-medium text-white/70">
-                Please wait a moment
-              </p>
+              <p className="text-[11px] font-bold text-white">Uploading...</p>
             </motion.div>
           )}
         </AnimatePresence>
@@ -830,7 +820,7 @@ function PhotoUploadZone({
             >
               <div
                 className={cn(
-                  "flex size-7 items-center justify-center rounded-full",
+                  "flex size-6 items-center justify-center rounded-full",
                   "bg-gradient-to-br from-[#4CAF50] to-[#2E7D32]",
                   "shadow-[0_4px_16px_rgba(76,175,80,0.5)]"
                 )}
@@ -848,7 +838,7 @@ function PhotoUploadZone({
           aria-label="Remove photo"
           disabled={isUploading}
           className={cn(
-            "absolute right-2 top-2 z-30 flex size-8 items-center justify-center rounded-full",
+            "absolute right-2 top-2 z-30 flex size-7 items-center justify-center rounded-full",
             "bg-black/60 text-white backdrop-blur-md",
             "transition-all duration-200",
             "hover:bg-black/80 hover:scale-105",
@@ -856,21 +846,21 @@ function PhotoUploadZone({
             isUploading && "cursor-not-allowed opacity-50"
           )}
         >
-          <X className="size-4" strokeWidth={2.5} />
+          <X className="size-3.5" strokeWidth={2.5} />
         </button>
       </div>
 
-      {/* ─── File info bar (below image) ─── */}
+      {/* Compact info bar */}
       <div
         className={cn(
-          "flex flex-col gap-1.5 border-t px-3 py-2.5",
+          "flex items-center justify-between gap-2 border-t px-3 py-2",
           "border-[#E5E0D5] bg-[#FCFBF7]",
           "dark:border-[#4A473F] dark:bg-[#262421]"
         )}
       >
         <p
           className={cn(
-            "w-full truncate text-[11.5px] font-bold tracking-tight",
+            "min-w-0 flex-1 truncate text-[11px] font-bold tracking-tight",
             "text-[#2E2A24] dark:text-[#F7F5F0]"
           )}
           title={file?.name ?? "Your photo"}
@@ -878,11 +868,11 @@ function PhotoUploadZone({
           {file?.name ?? "Your photo"}
         </p>
 
-        <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-semibold">
+        <div className="flex shrink-0 items-center gap-1 text-[10px] font-semibold">
           {file && (
             <span
               className={cn(
-                "inline-flex items-center rounded-full px-2 py-0.5",
+                "rounded-full px-1.5 py-0.5",
                 "bg-[#E5E0D5] text-[#8B8478]",
                 "dark:bg-[#4A473F] dark:text-[#B5B0A5]"
               )}
@@ -898,7 +888,7 @@ function PhotoUploadZone({
           {uploadSuccess && uploadedSize && (
             <span
               className={cn(
-                "inline-flex items-center gap-1 rounded-full px-2 py-0.5",
+                "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5",
                 "bg-[#4CAF50]/15 text-[#2E7D32]",
                 "border border-[#4CAF50]/30",
                 "dark:bg-[#4CAF50]/20 dark:text-[#7ED881]"
@@ -912,13 +902,13 @@ function PhotoUploadZone({
           {uploadError && !isUploading && (
             <span
               className={cn(
-                "inline-flex items-center gap-1 rounded-full px-2 py-0.5",
+                "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5",
                 "bg-red-100 text-red-700",
                 "dark:bg-red-900/30 dark:text-red-400"
               )}
             >
               <AlertCircle className="size-2.5" strokeWidth={3} />
-              <span className="truncate max-w-[120px]">{uploadError}</span>
+              Error
             </span>
           )}
         </div>
