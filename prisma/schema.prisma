@@ -1,0 +1,201 @@
+// ============================================
+// LEXA AI — Prisma Schema
+// Stack: Next.js + Clerk + Prisma + Neon
+// Payments: Google Play (RevenueCat) + Safepay (Web)
+// Currency: USD
+// ============================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum PlanType {
+  FREE // No subscription, 4 credits on signup
+  BASIC // $4.99/month — 20 credits monthly
+  PRO // $7.99/month — 40 credits monthly
+}
+
+enum PaymentProvider {
+  NONE // Free user, never paid
+  SAFEPAY // Subscribed via web (Safepay)
+  GOOGLE // Subscribed via Android app (RevenueCat)
+}
+
+enum SafepayStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+enum FeatureType {
+  HAIRSTYLE
+  BEARD
+  OUTFIT
+  AGE
+  HAIRCOLOR
+  IMAGEGEN
+}
+
+enum CreditReason {
+  SIGNUP_BONUS // 4 free credits on signup
+  SUBSCRIPTION // Credits from monthly subscription
+  USAGE // Credits spent on a generation
+  REFUND // Credits refunded (failed generation)
+  MONTHLY_RESET // Monthly credit refill on renewal
+  ADMIN_GRANT // Manually granted by admin
+}
+
+// 🆕 NEW: TaskStatus for YouCam task tracking
+enum TaskStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ============================================
+// USER
+// ============================================
+
+model User {
+  id        String  @id @default(cuid()) // internal DB id
+  clerkId   String  @unique // Clerk user ID (user_2abc...)
+  email     String  @unique
+  firstName String?
+  lastName  String?
+  imageUrl  String?
+
+  // ---------- Credits & Plan ----------
+  credits Int      @default(4) // 🎁 4 free credits on signup
+  plan    PlanType @default(FREE)
+  isPro   Boolean  @default(false)
+
+  // ---------- Which payment method activated the current plan ----------
+  paymentProvider PaymentProvider @default(NONE)
+
+  // ---------- Subscription dates ----------
+  planStartedAt DateTime?
+  planExpiresAt DateTime?
+  nextRenewalAt DateTime?
+
+  // ---------- RevenueCat (Google Play Billing — Mobile App) ----------
+  revenuecatAppUserId String? @unique
+  googlePlayToken     String? @unique
+  googlePlayProductId String?
+
+  // ---------- Stats ----------
+  totalGenerations Int      @default(0)
+  lastActiveAt     DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // ---------- Relations ----------
+  creations            Creation[]
+  creditHistory        CreditTransaction[]
+  safepaySubscriptions SafepaySubscription[]
+
+  @@index([clerkId])
+  @@index([email])
+  @@index([plan])
+  @@index([paymentProvider])
+}
+
+// ============================================
+// SAFEPAY SUBSCRIPTION (Web Payments)
+// Separate table — only used when user pays on web
+// ============================================
+
+model SafepaySubscription {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // ---------- Safepay IDs ----------
+  safepayCustomerId     String?
+  safepaySubscriptionId String? @unique
+  safepayTrackerId      String? @unique
+  safepayPlanId         String?
+
+  // ---------- Plan details ----------
+  planType PlanType
+  status   SafepayStatus @default(ACTIVE)
+
+  // ---------- Amount & Currency ----------
+  amount   Int? // in smallest unit (cents) — e.g., 499 = $4.99
+  currency String? @default("USD")
+
+  // ---------- Dates ----------
+  startedAt    DateTime  @default(now())
+  currentStart DateTime?
+  currentEnd   DateTime?
+  cancelledAt  DateTime?
+
+  // ---------- Raw webhook for debugging ----------
+  rawPayload Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([safepaySubscriptionId])
+  @@index([status])
+}
+
+// ============================================
+// CREATION — every AI generation
+// ============================================
+
+model Creation {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  feature          FeatureType
+  imageUrl         String? // ✨ AI-generated result (null until task completes)
+  originalImageUrl String? // 📷 user's uploaded photo (optional)
+  prompt           String? // 📝 Only for AI generation
+  creditsUsed      Int         @default(1)
+  metadata         Json?
+
+  // ---------- 🆕 YouCam task tracking ----------
+  taskId String?    @unique // YouCam task ID from startTask()
+  status TaskStatus @default(PROCESSING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt // 🆕 To track status changes
+
+  @@index([userId])
+  @@index([feature])
+  @@index([status]) // 🆕 For fast cron/queries
+  @@index([createdAt])
+}
+
+// ============================================
+// CREDIT TRANSACTION — audit log
+// ============================================
+
+model CreditTransaction {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  amount   Int // positive = added, negative = spent
+  reason   CreditReason
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([reason])
+  @@index([createdAt])
+}
