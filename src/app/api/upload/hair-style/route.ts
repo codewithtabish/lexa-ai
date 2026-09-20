@@ -3,7 +3,7 @@ import { uploadHairStyleAction } from "@/actions/images/uplaod-hair-style-action
 import { NextResponse } from "next/server";
 
 export const maxDuration = 30;
-export const dynamic = "force-dynamic";
+// export const dynamic = "force-dynamic";
 
 // ═══════════════════════════════════════════
 // POST — Upload hair style image
