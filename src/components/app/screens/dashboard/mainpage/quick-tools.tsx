@@ -62,7 +62,7 @@ const quickTools = [
     subtitle: "Create anything you imagine",
     image: "/images/feat/ai.png",
     icon: <Sparkles className="w-5 h-5" />,
-    href: "/app/ai-generate",
+    href: "/app/create",
   },
 ];
 

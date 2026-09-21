@@ -2,10 +2,14 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { cacheLife, cacheTag } from "next/cache";
+import { cacheLife, cacheTag, revalidateTag } from "next/cache";
 
 import prisma from "@/lib/prisma-client";
 import { CACHE_TAGS } from "@/lib/cache-key";
+
+// ═══════════════════════════════════════════════════════════
+// TYPES
+// ═══════════════════════════════════════════════════════════
 
 export type UserInfo = {
   id: string;
@@ -24,74 +28,188 @@ export type UserInfo = {
   lastActiveAt: Date;
 };
 
+export type CreationItem = {
+  id: string;
+  feature: string;
+  imageUrl: string | null;
+  originalImageUrl: string | null;
+  prompt: string | null;
+  creditsUsed: number;
+  status: string;
+  createdAt: Date;
+};
+
 type GetUserResult =
-  | { success: true; user: UserInfo }
+  | {
+      success: true;
+      user: UserInfo;
+      creations: CreationItem[];
+    }
   | { success: false; error: string };
 
-async function getCachedUser(clerkId: string): Promise<UserInfo> {
+interface GetUserInput {
+  /** Limit recent creations (default 8). Pass 0 for none. */
+  creationsLimit?: number;
+}
+
+// ═══════════════════════════════════════════════════════════
+// SHARED SELECT FIELDS
+// ═══════════════════════════════════════════════════════════
+
+const USER_SELECT = {
+  id: true,
+  clerkId: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  imageUrl: true,
+  credits: true,
+  plan: true,
+  isPro: true,
+  planStartedAt: true,
+  planExpiresAt: true,
+  nextRenewalAt: true,
+  totalGenerations: true,
+  lastActiveAt: true,
+} as const;
+
+const CREATION_SELECT = {
+  id: true,
+  feature: true,
+  imageUrl: true,
+  originalImageUrl: true,
+  prompt: true,
+  creditsUsed: true,
+  status: true,
+  createdAt: true,
+} as const;
+
+// ═══════════════════════════════════════════════════════════
+// CACHED QUERY (user + recent creations)
+// ═══════════════════════════════════════════════════════════
+
+async function getCachedAppData(
+  clerkId: string,
+  creationsLimit: number
+): Promise<{ user: UserInfo; creations: CreationItem[] }> {
   "use cache";
   cacheLife("max");
   cacheTag(CACHE_TAGS.users);
 
-  console.log(`[getCachedUser] 🔍 DB query for: ${clerkId}`);
-
+  // Fetch user
   const user = await prisma.user.findUnique({
     where: { clerkId },
-    select: {
-      id: true, clerkId: true, email: true,
-      firstName: true, lastName: true, imageUrl: true,
-      credits: true, plan: true, isPro: true,
-      planStartedAt: true, planExpiresAt: true, nextRenewalAt: true,
-      totalGenerations: true, lastActiveAt: true,
-    },
+    select: USER_SELECT,
   });
 
   if (!user) {
-    console.log(`[getCachedUser] ❌ NULL → will NOT cache`);
     throw new Error(`USER_NOT_FOUND:${clerkId}`);
   }
 
-  console.log(`[getCachedUser] ✅ Found (${user.credits} credits) → caching`);
-  return user;
+  // Fetch recent creations (only if limit > 0)
+  let creations: CreationItem[] = [];
+  if (creationsLimit > 0) {
+    creations = await prisma.creation.findMany({
+      where: {
+        userId: user.id,
+        status: "COMPLETED",
+      },
+      orderBy: { createdAt: "desc" },
+      take: creationsLimit,
+      select: CREATION_SELECT,
+    });
+  }
+
+  return { user, creations };
 }
 
-export async function getUserAction(): Promise<GetUserResult> {
+// ═══════════════════════════════════════════════════════════
+// DIRECT DB READ (bypasses cache — for cold start retries)
+// ═══════════════════════════════════════════════════════════
+
+async function getAppDataDirect(
+  clerkId: string,
+  creationsLimit: number
+): Promise<{ user: UserInfo; creations: CreationItem[] } | null> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { clerkId },
+      select: USER_SELECT,
+    });
+
+    if (!user) return null;
+
+    let creations: CreationItem[] = [];
+    if (creationsLimit > 0) {
+      creations = await prisma.creation.findMany({
+        where: {
+          userId: user.id,
+          status: "COMPLETED",
+        },
+        orderBy: { createdAt: "desc" },
+        take: creationsLimit,
+        select: CREATION_SELECT,
+      });
+    }
+
+    return { user, creations };
+  } catch (err: any) {
+    console.warn("[getAppDataDirect] DB error:", err.message);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// MAIN ACTION
+// ═══════════════════════════════════════════════════════════
+
+export async function getUserAction(
+  input: GetUserInput = {}
+): Promise<GetUserResult> {
+  const creationsLimit = input.creationsLimit ?? 8;
+
   try {
     const { userId } = await auth();
-    console.log(`\n[getUserAction] 🚀 Called for: ${userId ?? "NONE"}`);
 
     if (!userId) {
       return { success: false, error: "Not authenticated." };
     }
 
-    // ─── Attempt 1: cached lookup ───
+    // ─── Step 1: Try cache ───
     try {
-      const user = await getCachedUser(userId);
-      console.log(`[getUserAction] ⚡ From cache: ${user.credits} credits`);
-      return { success: true, user };
+      const cached = await getCachedAppData(userId, creationsLimit);
+      return {
+        success: true,
+        user: cached.user,
+        creations: cached.creations,
+      };
     } catch (err: any) {
       if (!err.message?.startsWith("USER_NOT_FOUND:")) throw err;
-      console.log(`[getUserAction] ⏳ Not yet in DB (webhook still running)`);
     }
 
-    // ─── Retry: 6 attempts × 800ms = ~5 seconds ───
-    for (let attempt = 1; attempt <= 6; attempt++) {
-      console.log(`[getUserAction] 🔄 Retry ${attempt}/6 in 800ms...`);
-      await new Promise((r) => setTimeout(r, 800));
+    // ─── Step 2: Retry with direct DB (cold start) ───
+    const delays = [400, 700, 1000, 1400, 1800, 2200, 2500];
 
-      try {
-        const user = await getCachedUser(userId);
-        console.log(
-          `[getUserAction] ✅ Found & cached on retry ${attempt}: ${user.credits} credits`
-        );
-        return { success: true, user };
-      } catch (err: any) {
-        if (!err.message?.startsWith("USER_NOT_FOUND:")) throw err;
-        console.log(`[getUserAction] ⏳ Retry ${attempt} — still NULL`);
+    for (let attempt = 0; attempt < delays.length; attempt++) {
+      await new Promise((r) => setTimeout(r, delays[attempt]));
+
+      const direct = await getAppDataDirect(userId, creationsLimit);
+
+      if (direct) {
+        // Prime cache for future calls
+        try {
+          revalidateTag(CACHE_TAGS.users, "max");
+        } catch {}
+
+        return {
+          success: true,
+          user: direct.user,
+          creations: direct.creations,
+        };
       }
     }
 
-    console.log(`[getUserAction] ❌ Not found after 6 retries`);
+    // ─── Step 3: All retries failed ───
     return {
       success: false,
       error: "Setting up your account. Please refresh in a moment.",
