@@ -20,4 +20,20 @@ export const hairTemplates: HairTemplate[] = [
     category: "male",
     styleCategory: "short",
   },
+  {
+    id: "long-wavy-flow-02",
+    title: "Long Wavy Flow",
+    thumb: "https://d2rpzp0h8kdnc1.cloudfront.net/lexa/two.png",
+    imageUrl: "https://d2rpzp0h8kdnc1.cloudfront.net/lexa/two.png",
+    category: "male",
+    styleCategory: "long",
+  },
+  {
+    id: "curly-top-knot-03",
+    title: "Curly Top Knot",
+    thumb: "https://d2rpzp0h8kdnc1.cloudfront.net/lexa/3.png",
+    imageUrl: "https://d2rpzp0h8kdnc1.cloudfront.net/lexa/3.png",
+    category: "male",
+    styleCategory: "medium",
+  },
 ];
