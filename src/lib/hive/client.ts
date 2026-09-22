@@ -1,5 +1,4 @@
 // src/lib/hive/client.ts
-// "use server";
 
 const HIVE_BASE_URL = "https://api.thehive.ai/api/v3";
 
@@ -94,21 +93,33 @@ export async function generateHiveImage({
 
   const valid = getValidDimensions(width, height);
 
-  const body = {
-    input: {
-      prompt: prompt.trim(),
-      image_size: { width: valid.width, height: valid.height },
-      num_inference_steps: steps,
-      num_images: 1,              // ✅ Force single image
-      output_format: outputFormat,
-      output_quality: 90,
-      ...(typeof seed === "number" ? { seed } : {}),
-    },
+  // 🎯 Build input — output_format ONLY for non-emoji models
+  const isEmojiModel = model === "hive/flux-schnell-emoji";
+
+  const input: Record<string, unknown> = {
+    prompt: prompt.trim(),
+    image_size: { width: valid.width, height: valid.height },
+    num_inference_steps: steps,
+    num_images: 1, // ✅ Force single image
+    ...(typeof seed === "number" ? { seed } : {}),
   };
+
+  // 🎯 Emoji model: NO output_format, NO output_quality (always transparent PNG)
+  // 🎯 Other models: include output_format + output_quality (only for jpeg)
+  if (!isEmojiModel) {
+    input.output_format = outputFormat;
+    if (outputFormat === "jpeg") {
+      input.output_quality = 90;
+    }
+  }
+
+  const body = { input };
 
   console.log(`[Hive] Generating with ${model}:`, {
     prompt: prompt.slice(0, 60) + (prompt.length > 60 ? "..." : ""),
     size: `${valid.width}×${valid.height}`,
+    format: isEmojiModel ? "png (forced)" : outputFormat,
+    steps,
   });
 
   const response = await fetch(`${HIVE_BASE_URL}/${model}`, {
@@ -150,10 +161,12 @@ export async function generateHiveEmoji({
   prompt,
   size = 1024,
   steps = 4,
+  seed,
 }: {
   prompt: string;
   size?: number;
   steps?: number;
+  seed?: number;
 }): Promise<GenerateImageResult> {
   return generateHiveImage({
     prompt,
@@ -161,6 +174,6 @@ export async function generateHiveEmoji({
     width: size,
     height: size,
     steps,
-    outputFormat: "png",
+    seed,
   });
 }

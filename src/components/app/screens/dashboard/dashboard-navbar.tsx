@@ -19,12 +19,11 @@ import {
   Menu,
   X,
   Home,
-  Wand2,
   History,
-  Image as ImageIcon,
   Gem,
   ChevronRight,
   Crown,
+  LayoutGrid,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
@@ -36,9 +35,8 @@ import { getUserAction, type UserInfo } from "@/actions/users/get-user-action";
 
 const NAV_LINKS = [
   { label: "Home", href: "/app", icon: Home, exact: true },
-  { label: "Generate", href: "/app/generate", icon: Wand2 },
   { label: "History", href: "/app/history", icon: History },
-  { label: "Gallery", href: "/gallery", icon: ImageIcon },
+  { label: "Features", href: "/app/features", icon: LayoutGrid },
   { label: "Pricing", href: "/pricing", icon: Gem },
 ];
 
@@ -78,13 +76,6 @@ function Shimmer({
 export function DashboardNavbar() {
   const pathname = usePathname();
 
-  // 🚫 Hide on every route except exact "/app"
-  //    • /app               → ✅ shows
-  //    • /app/hair-studio   → ❌ hidden
-  //    • /app/age-simulator → ❌ hidden
-  //    • /app/history       → ❌ hidden
-  //    • /app/generate      → ❌ hidden
-  //    • /pricing           → ❌ hidden
   if (pathname !== "/app") {
     return null;
   }
@@ -93,7 +84,7 @@ export function DashboardNavbar() {
 }
 
 // ============================================
-// 🧠 INNER COMPONENT — All the real logic
+// 🧠 INNER COMPONENT
 // ============================================
 
 function DashboardNavbarContent() {

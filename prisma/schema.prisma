@@ -164,6 +164,7 @@ model Creation {
   imageUrl         String? // ✨ AI-generated result (null until task completes)
   originalImageUrl String? // 📷 user's uploaded photo (optional)
   prompt           String? // 📝 Only for AI generation
+  images           String[]    @default([]) // 🆕 multi-image features (optional, defaults to [])
   creditsUsed      Int         @default(1)
   metadata         Json?
 

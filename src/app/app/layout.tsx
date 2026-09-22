@@ -12,21 +12,19 @@ export default function AppLayout({
   children: React.ReactNode;
 }) {
   return (
-    <>
+    <div className="flex min-h-screen flex-col">
+      {/* ✅ Sticky navbar container — only the navbar sticks */}
       <React.Suspense fallback={<DashboardNavbarFallback />}>
         <DashboardNavbar />
       </React.Suspense>
 
-      <main className="flex min-h-[calc(100vh-4rem)] flex-1 flex-col">
-        {/* 🆕 Explicit spacer — guaranteed to prevent navbar overlap */}
-        <div className="h-16 shrink-0" aria-hidden="true" />
+      {/* ✅ Spacer sits OUTSIDE main, right after navbar */}
+      <div className="h-16 shrink-0" aria-hidden="true" />
 
-        <div className="flex-1 px-4 sm:px-6 lg:px-8">
-          {children}
-        </div>
-
-        <Footer />
+      {/* ✅ Main content — flows naturally, scrolls with page */}
+      <main className="flex flex-1 flex-col">
+        <div className="flex-1">{children}</div>
       </main>
-    </>
+    </div>
   );
 }

@@ -32,10 +32,12 @@ export type CreationItem = {
   id: string;
   feature: string;
   imageUrl: string | null;
+  images: string[];              // 🆕 multi-image features (Age)
   originalImageUrl: string | null;
   prompt: string | null;
   creditsUsed: number;
   status: string;
+  metadata: any;                 // 🆕 for ages array, provider, etc.
   createdAt: Date;
 };
 
@@ -48,7 +50,6 @@ type GetUserResult =
   | { success: false; error: string };
 
 interface GetUserInput {
-  /** Limit recent creations (default 8). Pass 0 for none. */
   creationsLimit?: number;
 }
 
@@ -77,15 +78,17 @@ const CREATION_SELECT = {
   id: true,
   feature: true,
   imageUrl: true,
+  images: true,                  // 🆕
   originalImageUrl: true,
   prompt: true,
   creditsUsed: true,
   status: true,
+  metadata: true,                // 🆕
   createdAt: true,
 } as const;
 
 // ═══════════════════════════════════════════════════════════
-// CACHED QUERY (user + recent creations)
+// CACHED QUERY
 // ═══════════════════════════════════════════════════════════
 
 async function getCachedAppData(
@@ -96,7 +99,6 @@ async function getCachedAppData(
   cacheLife("max");
   cacheTag(CACHE_TAGS.users);
 
-  // Fetch user
   const user = await prisma.user.findUnique({
     where: { clerkId },
     select: USER_SELECT,
@@ -106,7 +108,6 @@ async function getCachedAppData(
     throw new Error(`USER_NOT_FOUND:${clerkId}`);
   }
 
-  // Fetch recent creations (only if limit > 0)
   let creations: CreationItem[] = [];
   if (creationsLimit > 0) {
     creations = await prisma.creation.findMany({
@@ -124,7 +125,7 @@ async function getCachedAppData(
 }
 
 // ═══════════════════════════════════════════════════════════
-// DIRECT DB READ (bypasses cache — for cold start retries)
+// DIRECT DB READ
 // ═══════════════════════════════════════════════════════════
 
 async function getAppDataDirect(
@@ -175,7 +176,6 @@ export async function getUserAction(
       return { success: false, error: "Not authenticated." };
     }
 
-    // ─── Step 1: Try cache ───
     try {
       const cached = await getCachedAppData(userId, creationsLimit);
       return {
@@ -187,7 +187,6 @@ export async function getUserAction(
       if (!err.message?.startsWith("USER_NOT_FOUND:")) throw err;
     }
 
-    // ─── Step 2: Retry with direct DB (cold start) ───
     const delays = [400, 700, 1000, 1400, 1800, 2200, 2500];
 
     for (let attempt = 0; attempt < delays.length; attempt++) {
@@ -196,7 +195,6 @@ export async function getUserAction(
       const direct = await getAppDataDirect(userId, creationsLimit);
 
       if (direct) {
-        // Prime cache for future calls
         try {
           revalidateTag(CACHE_TAGS.users, "max");
         } catch {}
@@ -209,7 +207,6 @@ export async function getUserAction(
       }
     }
 
-    // ─── Step 3: All retries failed ───
     return {
       success: false,
       error: "Setting up your account. Please refresh in a moment.",
