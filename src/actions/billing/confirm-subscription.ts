@@ -4,6 +4,7 @@
 import { revalidateTag } from "next/cache";
 import prisma from "@/lib/prisma-client";
 import { CACHE_TAGS } from "@/lib/cache-key";
+import { PLANS } from "@/data/plans";
 
 type Result =
   | {
@@ -13,6 +14,12 @@ type Result =
       creditsGranted?: number;
     }
   | { success: false; error: string };
+
+// 🎯 Map internal plan type → Safepay's real plan ID
+function getSafepayPlanIdFromType(planType: string): string | null {
+  const plan = PLANS.find((p) => p.id === planType);
+  return plan?.safepayPlanId ?? null;
+}
 
 export async function confirmSubscriptionByRef(ref: string): Promise<Result> {
   try {
@@ -45,6 +52,10 @@ export async function confirmSubscriptionByRef(ref: string): Promise<Result> {
       return { success: false, error: "Unknown plan type." };
     }
 
+    const now = new Date();
+    const renewalDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    // 1️⃣ Grant credits + upgrade plan
     await prisma.user.update({
       where: { id: sub.userId },
       data: {
@@ -52,11 +63,12 @@ export async function confirmSubscriptionByRef(ref: string): Promise<Result> {
         plan: sub.planType,
         isPro: true,
         paymentProvider: "SAFEPAY",
-        planStartedAt: new Date(),
-        nextRenewalAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        planStartedAt: now,
+        nextRenewalAt: renewalDate,
       },
     });
 
+    // 2️⃣ Log credit transaction
     await prisma.creditTransaction.create({
       data: {
         userId: sub.userId,
@@ -70,12 +82,26 @@ export async function confirmSubscriptionByRef(ref: string): Promise<Result> {
       },
     });
 
+    // 3️⃣ Update subscription with ALL fields populated
     await prisma.safepaySubscription.update({
       where: { id: sub.id },
-      data: { safepaySubscriptionId: `safepay_${ref}` },
+      data: {
+        safepaySubscriptionId: `safepay_${ref}`,
+        safepayPlanId: getSafepayPlanIdFromType(sub.planType), // 🎯
+        currentStart: now,                                     // 🎯
+        currentEnd: renewalDate,                               // 🎯
+        rawPayload: {                                          // 🎯
+          source: "payment-confirm-redirect",
+          reference: ref,
+          planType: sub.planType,
+          amount: sub.amount,
+          currency: sub.currency,
+          activatedAt: now.toISOString(),
+        },
+      },
     });
 
-    revalidateTag(CACHE_TAGS.users,"default");
+    revalidateTag(CACHE_TAGS.users, "default");
 
     console.log(
       `[confirmSubscriptionByRef] ✅ ${credits} credits → ${sub.userId}`
