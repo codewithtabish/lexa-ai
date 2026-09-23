@@ -1,14 +1,10 @@
 // src/lib/youcam/feature-costs.ts
 
 export const FEATURE_COSTS = {
-  HAIRSTYLE: 2,
-  BEARD: 2,
-  OUTFIT: 3,
-
-  // ─── Age Simulator ────────────────────────────────────
-  // 🎯 FLAT cost per generation — NOT per age
-  AGE: 2,
-
+  HAIRSTYLE: 1,
+  BEARD: 1,
+  OUTFIT: 1,
+  AGE: 2,       // 🎯 set to 3
   HAIRCOLOR: 1,
   IMAGEGEN: 1,
 } as const;

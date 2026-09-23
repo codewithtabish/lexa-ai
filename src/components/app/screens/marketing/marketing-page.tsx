@@ -6,10 +6,12 @@ import { TestimonialsSection } from './testimonials-section'
 import { PricingSection } from './pricing-section'
 import { FaqSection } from './faq-section'
 import { ContactCta } from '../about/contact-cta'
+import BeardTest from '../../general/beard-test'
 
 const MarketingPage = () => {
   return (
     <>
+    {/* <BeardTest/> */}
         <HeroSection/>
         <TransformationsSection/>
         <WhyLexaSection/>

@@ -1,7 +1,8 @@
-// src/app/app/age-studio/page.tsx
+// src/app/app/outfit-studio/page.tsx
 "use client";
 
 import * as React from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -19,8 +20,9 @@ import {
   Crown,
   Download,
   History as HistoryIcon,
-  Clock,
-  Users,
+  RefreshCw,
+  Share2,
+  Camera,
 } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
@@ -29,29 +31,42 @@ import {
   type CreationItem,
 } from "@/actions/users/get-user-action";
 import { uploadHairStyleAction } from "@/actions/images/uplaod-hair-style-action";
+import { getFeatureCost } from "@/lib/youcam/feature-costs";
 import {
-  startAgeSimulator,
-  checkAgeSimulatorStatus,
-} from "@/actions/agestudio/age-studio-action";
+  startOutfitTryOn,
+  checkOutfitStatus,
+} from "@/actions/outfit/outfit-action";
+import {
+  outfitTemplates,
+  OUTFIT_CATEGORY_LABELS,
+  OUTFIT_GENDER_LABELS,
+  type OutfitCategory,
+  type OutfitGender,
+  type OutfitTemplate,
+} from "@/data/outfit-templates";
 
 // ============================================
 // CONFIG
 // ============================================
 
-// 🎯 AGE STUDIO = EXACTLY 2 CREDITS (hardcoded — UI source of truth)
-const FLAT_COST = 2;
+const FLAT_COST = getFeatureCost("OUTFIT"); // → 1
 
 const LOADING_MESSAGES = [
-  "Analyzing your face...",
-  "Detecting current age...",
-  "Aging you step by step...",
+  "Analyzing your photo...",
+  "Detecting body pose...",
+  "Fitting your outfit...",
+  "Blending fabric detail...",
   "Preserving your features...",
-  "Adding fine details...",
   "Almost there...",
 ];
 
-const FILTERS = ["All", "Teens", "20s", "30s", "40s", "50s", "60s+"] as const;
-type Filter = (typeof FILTERS)[number];
+const INITIAL_VISIBLE_TEMPLATES = 8;
+
+const POLL_INTERVAL_MS = 3000;
+const POLL_MAX_ATTEMPTS = 60;
+
+type GenderFilter = "all" | OutfitGender;
+type CategoryFilter = "all" | OutfitCategory;
 
 // ============================================
 // HELPERS
@@ -61,15 +76,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-function matchesFilter(age: number | null, filter: Filter): boolean {
-  if (filter === "All") return true;
-  if (age == null) return false;
-  if (filter === "Teens") return age < 20;
-  if (filter === "60s+") return age >= 60;
-  const decade = parseInt(filter.replace("s", ""), 10);
-  return age >= decade && age < decade + 10;
 }
 
 async function downloadImage(imageUrl: string, filename: string) {
@@ -105,24 +111,26 @@ async function downloadImage(imageUrl: string, filename: string) {
 // PAGE
 // ============================================
 
-export default function AgeStudioPage() {
+export default function OutfitStudioPage() {
   const router = useRouter();
   const { isSignedIn, isLoaded } = useUser();
 
   const resultsRef = React.useRef<HTMLDivElement>(null);
 
-  // Credits + recent
   const [credits, setCredits] = React.useState<number | null>(null);
   const [creditsLoading, setCreditsLoading] = React.useState(true);
   const [recentCreations, setRecentCreations] = React.useState<CreationItem[]>(
     []
   );
   const [refreshKey, setRefreshKey] = React.useState(0);
-  const [latestCreationId, setLatestCreationId] = React.useState<string | null>(
-    null
-  );
 
-  // Upload
+  const [selectedTemplate, setSelectedTemplate] =
+    React.useState<OutfitTemplate | null>(null);
+  const [genderFilter, setGenderFilter] = React.useState<GenderFilter>("all");
+  const [categoryFilter, setCategoryFilter] =
+    React.useState<CategoryFilter>("all");
+  const [showAllTemplates, setShowAllTemplates] = React.useState(false);
+
   const [uploadedFile, setUploadedFile] = React.useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const [uploadedUrl, setUploadedUrl] = React.useState<string | null>(null);
@@ -131,31 +139,19 @@ export default function AgeStudioPage() {
   const [uploadSuccess, setUploadSuccess] = React.useState(false);
   const [uploadError, setUploadError] = React.useState<string | null>(null);
 
-  // Generation
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [generatingStatus, setGeneratingStatus] = React.useState("");
   const [progress, setProgress] = React.useState(0);
   const [error, setError] = React.useState<string | null>(null);
-  const [resultImages, setResultImages] = React.useState<
-    { url: string; age: number }[]
-  >([]);
-  const [detectedAge, setDetectedAge] = React.useState<number | null>(null);
+  const [resultImage, setResultImage] = React.useState<string | null>(null);
+  const [originalImage, setOriginalImage] = React.useState<string | null>(null);
+  const [downloading, setDownloading] = React.useState(false);
 
-  // 🆕 Trigger scroll after results render
-  const [shouldScrollToResults, setShouldScrollToResults] =
-    React.useState(false);
-
-  // ─── Derived credit state ───
   const userCredits = credits ?? 0;
   const creditsKnown = !creditsLoading && credits !== null;
-
-  // ✅ AGE = 2 credits (FLAT_COST === 2)
   const canAfford = userCredits >= FLAT_COST;
-
-  // 🛡️ Lock the whole upload flow when credits are known AND insufficient
   const creditLock = creditsKnown && !canAfford;
 
-  // ─── Fetch credits + latest AGE creations only ───
   React.useEffect(() => {
     let cancelled = false;
     async function fetchData() {
@@ -165,18 +161,15 @@ export default function AgeStudioPage() {
       }
       setCreditsLoading(true);
       try {
-        // Fetch a larger pool so we can filter safely
         const result = await getUserAction({ creationsLimit: 12 });
         if (cancelled) return;
 
         if (result.success) {
           setCredits(result.user.credits);
-
-          // 🎯 Only AGE creations ever show here (never beard / hairstyle)
-          const ageCreations = result.creations.filter(
-            (c) => c.feature === "AGE"
+          const outfitCreations = result.creations.filter(
+            (c) => c.feature === "OUTFIT"
           );
-          setRecentCreations(ageCreations);
+          setRecentCreations(outfitCreations);
         } else {
           setCredits(0);
           setRecentCreations([]);
@@ -196,35 +189,31 @@ export default function AgeStudioPage() {
     };
   }, [isLoaded, isSignedIn, refreshKey]);
 
-  // Cleanup preview
   React.useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
 
-  // 🆕 Reliable scroll to results
   React.useEffect(() => {
-    if (!shouldScrollToResults) return;
-    if (resultImages.length === 0) return;
+    if (!resultImage) return;
 
-    const timeout = setTimeout(() => {
+    const timer = setTimeout(() => {
       const el = resultsRef.current;
       if (!el) return;
 
       const NAVBAR_OFFSET = 80;
-      const top =
-        el.getBoundingClientRect().top + window.pageYOffset - NAVBAR_OFFSET;
+      const scrollTop =
+        window.pageYOffset || document.documentElement.scrollTop || 0;
+      const rect = el.getBoundingClientRect();
+      const targetY = rect.top + scrollTop - NAVBAR_OFFSET;
 
-      window.scrollTo({ top, behavior: "smooth" });
+      window.scrollTo({ top: targetY, behavior: "smooth" });
+    }, 350);
 
-      setShouldScrollToResults(false);
-    }, 250);
+    return () => clearTimeout(timer);
+  }, [resultImage]);
 
-    return () => clearTimeout(timeout);
-  }, [shouldScrollToResults, resultImages.length]);
-
-  // Rotating messages
   React.useEffect(() => {
     if (!isGenerating) {
       setGeneratingStatus("");
@@ -236,23 +225,56 @@ export default function AgeStudioPage() {
     const msgInterval = setInterval(() => {
       idx = (idx + 1) % LOADING_MESSAGES.length;
       setGeneratingStatus(LOADING_MESSAGES[idx]);
-    }, 3500);
+    }, 2000);
     const progInterval = setInterval(() => {
-      setProgress((p) => (p >= 95 ? 95 : p + Math.random() * 2));
-    }, 900);
+      setProgress((p) => (p >= 95 ? 95 : p + Math.random() * 4));
+    }, 400);
     return () => {
       clearInterval(msgInterval);
       clearInterval(progInterval);
     };
   }, [isGenerating]);
 
-  // ─── Handlers ───
+  const genderOptions = React.useMemo(() => {
+    const set = new Set<OutfitGender>();
+    outfitTemplates.forEach((t) => set.add(t.gender));
+    return [
+      { id: "all" as const, label: "All" },
+      ...Array.from(set).map((g) => ({
+        id: g,
+        label: OUTFIT_GENDER_LABELS[g],
+      })),
+    ];
+  }, []);
+
+  const categoryOptions = React.useMemo(() => {
+    const set = new Set<OutfitCategory>();
+    outfitTemplates.forEach((t) => set.add(t.category));
+    return [
+      { id: "all" as const, label: "All" },
+      ...Array.from(set).map((c) => ({
+        id: c,
+        label: OUTFIT_CATEGORY_LABELS[c],
+      })),
+    ];
+  }, []);
+
+  const filteredTemplates = React.useMemo(() => {
+    return outfitTemplates
+      .filter((t) => genderFilter === "all" || t.gender === genderFilter)
+      .filter((t) => categoryFilter === "all" || t.category === categoryFilter)
+      .sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+  }, [genderFilter, categoryFilter]);
+
+  const visibleTemplates = React.useMemo(() => {
+    if (showAllTemplates) return filteredTemplates;
+    return filteredTemplates.slice(0, INITIAL_VISIBLE_TEMPLATES);
+  }, [filteredTemplates, showAllTemplates]);
 
   const handleFileSelect = async (file: File) => {
-    // 🛡️ Guard: user has < 2 credits → no API call
     if (creditLock) {
       setUploadError(
-        `You need ${FLAT_COST} credits to generate. Please upgrade.`
+        `You need ${FLAT_COST} credit${FLAT_COST > 1 ? "s" : ""} to generate. Please upgrade.`
       );
       return;
     }
@@ -293,7 +315,7 @@ export default function AgeStudioPage() {
         setUploadSuccess(false);
       }
     } catch (err) {
-      console.error("[AgeStudio] Upload error:", err);
+      console.error("[OutfitStudio] Upload error:", err);
       setUploadError("Failed to upload. Please try again.");
       setUploadSuccess(false);
     } finally {
@@ -314,9 +336,8 @@ export default function AgeStudioPage() {
   };
 
   const handleGenerate = async () => {
-    if (!uploadedUrl) return;
+    if (!uploadedUrl || !selectedTemplate) return;
 
-    // 🛡️ Guard: user has < 2 credits → no API call
     if (creditLock) {
       setError(
         `You need ${FLAT_COST} credits but have ${userCredits}. Please upgrade.`
@@ -326,87 +347,97 @@ export default function AgeStudioPage() {
 
     setIsGenerating(true);
     setError(null);
-    setResultImages([]);
-    setDetectedAge(null);
-    setLatestCreationId(null);
-    setShouldScrollToResults(false);
+    setResultImage(null);
+    setOriginalImage(null);
 
     try {
-      // ─── Step 1: Start YouCam task ───
-      const startResult = await startAgeSimulator({ imageUrl: uploadedUrl });
+      const startResult = await startOutfitTryOn({
+        imageUrl: uploadedUrl,
+        outfitTemplateId: selectedTemplate.id,
+      });
 
       if (!startResult.success) {
         setError(startResult.error);
-        setIsGenerating(false);
         return;
       }
 
       const { creationId } = startResult;
-      setLatestCreationId(creationId);
 
-      // ─── Step 2: Poll status every 2s ───
-      let attempts = 0;
-      const MAX_ATTEMPTS = 75;
+      for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
 
-      const interval = setInterval(async () => {
-        attempts++;
+        const statusResult = await checkOutfitStatus({ creationId });
 
-        if (attempts > MAX_ATTEMPTS) {
-          clearInterval(interval);
-          setError("Taking too long. Please try again.");
-          setIsGenerating(false);
+        if (!statusResult.success) {
+          setError(statusResult.error);
           return;
         }
 
-        try {
-          const status = await checkAgeSimulatorStatus({ creationId });
-
-          if (!status.success) return;
-
-          if (status.status === "COMPLETED") {
-            clearInterval(interval);
-
-            const sortedImages = [...status.images].sort(
-              (a, b) => a.age - b.age
-            );
-
-            setResultImages(sortedImages);
-            setDetectedAge(status.detectedAge ?? null);
-            setIsGenerating(false);
-            setRefreshKey((k) => k + 1);
-
-            setShouldScrollToResults(true);
-          } else if (status.status === "FAILED") {
-            clearInterval(interval);
-            setError("Generation failed. Your credit was not charged.");
-            setIsGenerating(false);
-            setRefreshKey((k) => k + 1);
-          }
-        } catch (pollErr) {
-          console.error("[AgeStudio] Poll error:", pollErr);
+        if (statusResult.status === "COMPLETED") {
+          setResultImage(statusResult.imageUrl);
+          setOriginalImage(uploadedUrl);
+          setProgress(100);
+          setRefreshKey((k) => k + 1);
+          return;
         }
-      }, 2000);
+
+        if (statusResult.status === "FAILED") {
+          setError("Generation failed. Please try again.");
+          return;
+        }
+      }
+
+      setError("Generation timed out. Please try again.");
     } catch (err: any) {
-      console.error("[AgeStudio] Generate error:", err);
-      setError(err.message || "Something went wrong. Please try again.");
+      console.error("[OutfitStudio] Generation error:", err);
+      setError("Something went wrong. Please try again.");
+    } finally {
       setIsGenerating(false);
     }
   };
 
-  // ─── Derived ───
-  const totalCost = FLAT_COST; // ✅ Always 2
+  const handleDownload = async () => {
+    if (!resultImage) return;
+    setDownloading(true);
+    await downloadImage(resultImage, `lexa-outfit-${Date.now()}.png`);
+    setDownloading(false);
+  };
+
+  const handleTryAnother = () => {
+    setResultImage(null);
+    setOriginalImage(null);
+    setSelectedTemplate(null);
+    setError(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleShare = async () => {
+    if (!resultImage) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: "My LEXA Outfit",
+          text: "Check out my new outfit created with LEXA AI!",
+          url: resultImage,
+        });
+      } else {
+        await navigator.clipboard.writeText(resultImage);
+      }
+    } catch {
+      // user cancelled
+    }
+  };
+
+  const totalCost = FLAT_COST;
 
   const canGenerate =
     !!uploadedUrl &&
     uploadSuccess &&
+    !!selectedTemplate &&
     !isUploading &&
     !isGenerating &&
     canAfford &&
     !creditLock;
-
-  // ============================================
-  // RENDER
-  // ============================================
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -419,7 +450,7 @@ export default function AgeStudioPage() {
 
       <HeroSection />
 
-      {/* ⚠️ LOW CREDIT WARNING — shown only when userCredits < 2 */}
+      {/* ⚠️ LOW CREDIT BANNER */}
       <div className="mx-auto w-full max-w-6xl">
         <AnimatePresence>
           {creditLock && (
@@ -444,11 +475,13 @@ export default function AgeStudioPage() {
                 </div>
                 <div>
                   <p className="text-[13px] font-extrabold tracking-tight text-[#2E2A24] dark:text-[#F7F5F0]">
-                    You need {FLAT_COST} credits to generate
+                    You need {FLAT_COST} credit{FLAT_COST > 1 ? "s" : ""} to
+                    generate
                   </p>
                   <p className="mt-0.5 text-[11.5px] font-medium text-[#8B8478] dark:text-[#B5B0A5]">
-                    Age Studio costs {FLAT_COST} credits per generation. Upgrade
-                    to unlock.
+                    Outfit Studio costs {FLAT_COST} credit
+                    {FLAT_COST > 1 ? "s" : ""} per generation. Upgrade to
+                    unlock.
                   </p>
                 </div>
               </div>
@@ -478,7 +511,7 @@ export default function AgeStudioPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
           className={cn(
-            "relative overflow-hidden rounded-3xl border p-5 sm:p-6 md:p-7",
+            "relative overflow-hidden rounded-3xl border p-4 sm:p-6 md:p-7",
             "border-[#E5E0D5] bg-[#FCFBF7]/80 backdrop-blur-xl",
             "dark:border-[#4A473F] dark:bg-[#262421]/80",
             "shadow-[0_8px_40px_-12px_rgba(217,154,91,0.15)]"
@@ -497,43 +530,173 @@ export default function AgeStudioPage() {
             onRemove={handleRemoveFile}
           />
 
-          {/* INFO BLOCK */}
+          {/* CHOOSE OUTFIT */}
           <div className="mt-6">
             <SectionLabel
-              label="WHAT YOU'LL GET"
-              right={`${totalCost} credits`}
+              label="CHOOSE OUTFIT"
+              right={`${filteredTemplates.length} available`}
             />
-            <div
-              className={cn(
-                "rounded-2xl border p-4",
-                "border-[#D18A4A]/30 bg-[#D99A5B]/5",
-                "dark:border-[#D99A5B]/30 dark:bg-[#D99A5B]/8"
-              )}
-            >
-              <div className="flex flex-wrap gap-x-6 gap-y-3">
-                <InfoRow
-                  icon={
-                    <Sparkles
-                      className="size-4"
-                      strokeWidth={2.5}
-                      fill="currentColor"
-                    />
-                  }
-                  title="Full Age Progression"
-                  subtitle="12 → 70 years"
-                />
-                <InfoRow
-                  icon={<Users className="size-4" strokeWidth={2.5} />}
-                  title="Multiple Ages"
-                  subtitle="Up to 16 portraits"
-                />
-                <InfoRow
-                  icon={<Clock className="size-4" strokeWidth={2.5} />}
-                  title="Ready in ~60–120s"
-                  subtitle="AI takes a moment"
-                />
-              </div>
+
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {genderOptions.map((g) => {
+                const active = genderFilter === g.id;
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => {
+                      setGenderFilter(g.id);
+                      setShowAllTemplates(false);
+                    }}
+                    className={cn(
+                      "rounded-full px-3 py-1.5 text-[11.5px] font-bold tracking-tight transition-all",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D18A4A]",
+                      active
+                        ? "bg-gradient-to-r from-[#D99A5B] to-[#B86F32] text-white shadow-[0_6px_16px_-4px_rgba(217,154,91,0.55)]"
+                        : "bg-[#F7F7F2] text-[#8B8478] hover:bg-[#FDF4EB] hover:text-[#2E2A24] dark:bg-[#1A1918] dark:text-[#B5B0A5] dark:hover:bg-[#33312D] dark:hover:text-[#F7F5F0]"
+                    )}
+                  >
+                    {g.label}
+                  </button>
+                );
+              })}
             </div>
+
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {categoryOptions.map((c) => {
+                const active = categoryFilter === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      setCategoryFilter(c.id);
+                      setShowAllTemplates(false);
+                    }}
+                    className={cn(
+                      "rounded-full px-3 py-1.5 text-[11.5px] font-bold tracking-tight transition-all",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D18A4A]",
+                      active
+                        ? "bg-[#D99A5B]/15 text-[#D18A4A] ring-1 ring-[#D18A4A]/40 dark:text-[#D99A5B]"
+                        : "bg-[#FCFBF7]/50 text-[#8B8478] hover:bg-[#FDF4EB]/60 hover:text-[#2E2A24] dark:bg-[#262421]/50 dark:text-[#B5B0A5] dark:hover:text-[#F7F5F0]"
+                    )}
+                  >
+                    {c.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {filteredTemplates.length === 0 ? (
+              <div className="rounded-2xl border border-[#E5E0D5] bg-[#FCFBF7] p-6 text-center dark:border-[#4A473F] dark:bg-[#262421]">
+                <p className="text-[13px] font-semibold text-[#8B8478] dark:text-[#B5B0A5]">
+                  No outfits in this filter.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                {visibleTemplates.map((template) => {
+                  const active = selectedTemplate?.id === template.id;
+                  return (
+                    <motion.button
+                      key={template.id}
+                      type="button"
+                      onClick={() => setSelectedTemplate(template)}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className={cn(
+                        "group relative flex flex-col overflow-hidden rounded-2xl border p-1.5 text-left",
+                        "transition-all duration-300",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D18A4A]",
+                        active
+                          ? [
+                              "border-[#D18A4A] bg-[#FDF4EB]/60",
+                              "shadow-[0_0_0_2px_rgba(217,154,91,0.35),0_8px_20px_-4px_rgba(217,154,91,0.35)]",
+                              "dark:border-[#D99A5B] dark:bg-[#D99A5B]/12",
+                            ]
+                          : [
+                              "border-[#E5E0D5] bg-[#FCFBF7] hover:border-[#D18A4A]/50 hover:bg-[#FDF4EB]/40",
+                              "dark:border-[#4A473F] dark:bg-[#262421] dark:hover:border-[#D99A5B]/50",
+                            ]
+                      )}
+                    >
+                      <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-[#F7F7F2] dark:bg-[#1A1918]">
+                        <Image
+                          src={template.imageUrl}
+                          alt={template.name}
+                          fill
+                          className="object-contain transition-transform duration-500 group-hover:scale-105"
+                          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                          unoptimized
+                        />
+
+                        {active && (
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.6 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            className={cn(
+                              "absolute right-1.5 top-1.5 flex size-6 items-center justify-center rounded-full",
+                              "bg-gradient-to-br from-[#D99A5B] to-[#B86F32] text-white",
+                              "shadow-[0_4px_12px_rgba(217,154,91,0.5)]"
+                            )}
+                          >
+                            <CheckCircle2
+                              className="size-3.5"
+                              strokeWidth={3}
+                            />
+                          </motion.div>
+                        )}
+
+                        {template.featured && !active && (
+                          <div
+                            className={cn(
+                              "absolute left-1.5 top-1.5 flex items-center gap-0.5 rounded-full px-1.5 py-0.5",
+                              "bg-gradient-to-r from-[#4CAF50] to-[#2E7D32]",
+                              "text-[8.5px] font-extrabold uppercase tracking-wider text-white"
+                            )}
+                          >
+                            <Sparkles
+                              className="size-2"
+                              strokeWidth={3}
+                              fill="currentColor"
+                            />
+                            New
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="px-0.5 pt-2 pb-1">
+                        <p className="truncate text-[11.5px] font-bold tracking-tight text-[#2E2A24] dark:text-[#F7F5F0]">
+                          {template.name}
+                        </p>
+                        {template.tagline && (
+                          <p className="mt-0.5 truncate text-[9.5px] font-medium text-[#8B8478] dark:text-[#B5B0A5]">
+                            {template.tagline}
+                          </p>
+                        )}
+                      </div>
+                    </motion.button>
+                  );
+                })}
+              </div>
+            )}
+
+            {!showAllTemplates &&
+              filteredTemplates.length > INITIAL_VISIBLE_TEMPLATES && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllTemplates(true)}
+                  className={cn(
+                    "mx-auto mt-4 flex items-center gap-1 text-[12px] font-bold",
+                    "text-[#D18A4A] transition-colors hover:text-[#B86F32]",
+                    "dark:text-[#D99A5B] dark:hover:text-[#E0A268]"
+                  )}
+                >
+                  See all {filteredTemplates.length} outfits
+                  <ArrowRight className="size-3.5" strokeWidth={2.5} />
+                </button>
+              )}
           </div>
 
           {/* GENERATE */}
@@ -588,14 +751,16 @@ export default function AgeStudioPage() {
                   />
                   <span>
                     {canGenerate
-                      ? `Generate All Ages — ${totalCost} credit${totalCost > 1 ? "s" : ""}`
+                      ? `Try This Outfit — ${totalCost} credit${totalCost > 1 ? "s" : ""}`
                       : creditLock
                         ? `Not enough credits — need ${totalCost}`
                         : !uploadedUrl
                           ? "Upload a photo to start"
                           : !uploadSuccess
                             ? "Uploading photo..."
-                            : "Preparing..."}
+                            : !selectedTemplate
+                              ? "Select an outfit"
+                              : "Preparing..."}
                   </span>
                   {canGenerate && (
                     <ArrowRight
@@ -655,20 +820,25 @@ export default function AgeStudioPage() {
         </motion.div>
       </div>
 
-      {/* 🎯 RESULTS — only renders when there's AGE content to show */}
-      <div ref={resultsRef} className="scroll-mt-24">
+      <div ref={resultsRef}>
         <ResultsSection
-          freshImages={resultImages}
-          recentCreations={recentCreations}
-          latestCreationId={latestCreationId}
-          detectedAge={detectedAge}
-          onViewAll={() => router.push("/app/history")}
+          resultImage={resultImage}
+          originalImage={originalImage}
+          templateName={selectedTemplate?.name ?? null}
+          onDownload={handleDownload}
+          onTryAnother={handleTryAnother}
+          onShare={handleShare}
+          downloading={downloading}
         />
       </div>
 
+      <RecentSection
+        creations={recentCreations}
+        onViewAll={() => router.push("/app/history")}
+      />
+
       <TrustStrip />
 
-      {/* GENERATING OVERLAY */}
       <AnimatePresence>
         {isGenerating && (
           <motion.div
@@ -725,12 +895,12 @@ export default function AgeStudioPage() {
                   />
                 </div>
                 <p className="mt-2 text-[11px] font-semibold text-white/70">
-                  {Math.round(progress)}% · Generating every age
+                  {Math.round(progress)}% · Fitting your outfit
                 </p>
               </div>
 
               <p className="text-[12px] font-medium text-white/50">
-                This usually takes 60–120 seconds
+                This usually takes 20–40 seconds
               </p>
             </div>
           </motion.div>
@@ -741,43 +911,7 @@ export default function AgeStudioPage() {
 }
 
 // ============================================
-// INFO ROW
-// ============================================
-
-function InfoRow({
-  icon,
-  title,
-  subtitle,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  subtitle: string;
-}) {
-  return (
-    <div className="flex items-start gap-2.5">
-      <div
-        className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-full",
-          "bg-[#D99A5B]/15 text-[#D18A4A]",
-          "dark:text-[#D99A5B]"
-        )}
-      >
-        {icon}
-      </div>
-      <div className="flex flex-col">
-        <span className="text-[12.5px] font-bold text-[#2E2A24] dark:text-[#F7F5F0]">
-          {title}
-        </span>
-        <span className="text-[10.5px] font-medium text-[#8B8478] dark:text-[#B5B0A5]">
-          {subtitle}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// ============================================
-// BACK BUTTON
+// BACK BUTTON — FIXED TOP PADDING
 // ============================================
 
 function BackButton({
@@ -802,7 +936,8 @@ function BackButton({
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       className={cn(
         "mx-auto flex w-full max-w-6xl items-center justify-between",
-        "px-1 pt-3 sm:pt-4"
+        // ✅ FIXED: proper top padding to clear fixed navbar
+        "px-1 pt-20 sm:pt-24"
       )}
     >
       <button
@@ -810,30 +945,21 @@ function BackButton({
         onClick={() => router.push(backHref)}
         aria-label="Go back"
         className={cn(
-          "group inline-flex items-center gap-2",
-          "rounded-full",
-          "border border-[#E5E0D5] bg-[#FCFBF7]/80 backdrop-blur-sm",
+          "group inline-flex items-center gap-2 rounded-full border px-3.5 py-2 sm:px-4 sm:py-2.5",
+          "border-[#E5E0D5] bg-[#FCFBF7]/80 backdrop-blur-sm",
           "dark:border-[#4A473F] dark:bg-[#262421]/80",
-          "px-3.5 py-2 sm:px-4 sm:py-2.5",
           "text-[13px] font-bold tracking-tight sm:text-[14px]",
           "text-[#2E2A24] dark:text-[#F7F5F0]",
           "shadow-[0_2px_8px_rgba(0,0,0,0.04)]",
-          "transition-all duration-300",
-          "hover:-translate-y-0.5",
+          "transition-all duration-300 hover:-translate-y-0.5",
           "hover:border-[#D18A4A]/50 hover:bg-[#FDF4EB]",
-          "hover:shadow-[0_8px_20px_rgba(217,154,91,0.15)]",
           "dark:hover:border-[#D99A5B]/50 dark:hover:bg-[#33312D]",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D18A4A] focus-visible:ring-offset-2",
-          "focus-visible:ring-offset-[#F7F7F2] dark:focus-visible:ring-offset-[#2B2B28]"
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D18A4A]",
+          "focus-visible:ring-offset-2 focus-visible:ring-offset-[#F7F7F2] dark:focus-visible:ring-offset-[#2B2B28]"
         )}
       >
         <ArrowLeft
-          className={cn(
-            "size-4 transition-transform duration-300",
-            "text-[#D18A4A] dark:text-[#D99A5B]",
-            "group-hover:-translate-x-0.5",
-            "sm:size-[18px]"
-          )}
+          className="size-4 text-[#D18A4A] transition-transform duration-300 group-hover:-translate-x-0.5 dark:text-[#D99A5B] sm:size-[18px]"
           strokeWidth={2.5}
         />
         <span className="hidden sm:inline">Back to Home</span>
@@ -843,12 +969,10 @@ function BackButton({
       {showCredits && (
         <div
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-full",
+            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 sm:px-3.5 sm:py-2",
             "bg-gradient-to-r from-[#D99A5B]/15 to-[#B86F32]/10",
-            "border border-[#D18A4A]/30",
-            "dark:from-[#D99A5B]/20 dark:to-[#B86F32]/15",
-            "dark:border-[#D99A5B]/40",
-            "px-3 py-1.5 sm:px-3.5 sm:py-2",
+            "border-[#D18A4A]/30",
+            "dark:from-[#D99A5B]/20 dark:to-[#B86F32]/15 dark:border-[#D99A5B]/40",
             "shadow-[0_2px_8px_rgba(217,154,91,0.1)]"
           )}
         >
@@ -891,7 +1015,7 @@ function BackButton({
 
 function HeroSection() {
   return (
-    <div className="relative mx-auto w-full max-w-6xl pb-2 pt-6 sm:pt-8">
+    <div className="relative mx-auto w-full max-w-6xl pt-4 sm:pt-6 lg:pt-8">
       <div className="grid items-center gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <div className="relative z-10">
           <div
@@ -906,23 +1030,46 @@ function HeroSection() {
               fill="currentColor"
             />
             <span className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-[#D18A4A] dark:text-[#D99A5B]">
-              Age Simulator
+              Outfit Studio
             </span>
           </div>
 
-          <h1 className="text-[40px] font-extrabold leading-[1.05] tracking-tight text-[#2E2A24] dark:text-[#F7F5F0] sm:text-[52px] md:text-[60px]">
-            See Yourself
+          <h1 className="text-[36px] font-extrabold leading-[1.05] tracking-tight text-[#2E2A24] dark:text-[#F7F5F0] sm:text-[48px] md:text-[56px]">
+            Dress Like
             <br />
             <span className="bg-gradient-to-r from-[#D99A5B] to-[#B86F32] bg-clip-text text-transparent">
-              At Every Age
+              You Mean It
             </span>
           </h1>
 
           <p className="mt-4 max-w-md text-[14px] font-medium leading-relaxed text-[#8B8478] dark:text-[#B5B0A5] sm:text-[15px]">
-            Upload one photo. Get the full progression
+            Upload one photo. Try on Pakistan's finest traditional
             <br />
-            from 12 to 70 years in one beautiful timeline.
+            wear — instantly.
           </p>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <HeroPill
+              icon={
+                <Sparkles
+                  className="size-3"
+                  strokeWidth={2.5}
+                  fill="currentColor"
+                />
+              }
+              label="12+ Outfits"
+            />
+            <HeroPill
+              icon={
+                <Zap className="size-3" strokeWidth={2.5} fill="currentColor" />
+              }
+              label="Instant"
+            />
+            <HeroPill
+              icon={<Lock className="size-3" strokeWidth={2.5} />}
+              label="Private"
+            />
+          </div>
         </div>
 
         <div className="relative">
@@ -932,13 +1079,30 @@ function HeroSection() {
           />
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/images/age-studio/age-studio.png"
-            alt="See yourself at every age"
+            src="/images/outfits/outfits.png"
+            alt="Outfit Studio"
             className="mx-auto h-auto w-full max-w-[560px] select-none object-contain drop-shadow-2xl"
             draggable={false}
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+function HeroPill({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5",
+        "border-[#E5E0D5] bg-[#FCFBF7]",
+        "dark:border-[#4A473F] dark:bg-[#262421]",
+        "text-[11px] font-bold tracking-tight",
+        "text-[#2E2A24] dark:text-[#F7F5F0]"
+      )}
+    >
+      <span className="text-[#D18A4A] dark:text-[#D99A5B]">{icon}</span>
+      {label}
     </div>
   );
 }
@@ -978,7 +1142,7 @@ function SectionLabel({
 }
 
 // ============================================
-// PHOTO SECTION — WITH 2-CREDIT LOCKOUT
+// PHOTO SECTION
 // ============================================
 
 function PhotoSection({
@@ -1085,12 +1249,12 @@ function PhotoSection({
             </p>
             <p className="mt-0.5 text-[12px] font-medium text-[#8B8478] dark:text-[#B5B0A5]">
               {disabled
-                ? `Add ${FLAT_COST} credits to unlock uploads`
+                ? `Add ${FLAT_COST} credit${FLAT_COST > 1 ? "s" : ""} to unlock uploads`
                 : "JPG · PNG · WEBP — up to 10MB"}
             </p>
             {!disabled && (
               <p className="mt-1.5 inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-[#D18A4A] dark:text-[#D99A5B]">
-                <Upload className="size-3" strokeWidth={2.5} />
+                <Camera className="size-3" strokeWidth={2.5} />
                 or take a selfie
               </p>
             )}
@@ -1106,7 +1270,7 @@ function PhotoSection({
                   Front-facing selfie
                 </span>
                 <span className="rounded-full border border-[#E5E0D5] bg-[#FCFBF7]/60 px-2.5 py-1 text-[10.5px] font-semibold text-[#8B8478] dark:border-[#4A473F] dark:bg-[#262421]/60 dark:text-[#B5B0A5]">
-                  Good lighting
+                  Full body shot
                 </span>
               </div>
             </div>
@@ -1239,13 +1403,7 @@ function PhotoSection({
           )}
 
           {uploadError && !isUploading && (
-            <span
-              className={cn(
-                "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5",
-                "bg-red-100 text-red-700",
-                "dark:bg-red-900/30 dark:text-red-400"
-              )}
-            >
+            <span className="inline-flex items-center gap-0.5 rounded-full bg-red-100 px-1.5 py-0.5 text-red-700 dark:bg-red-900/30 dark:text-red-400">
               <AlertCircle className="size-2.5" strokeWidth={3} />
               Error
             </span>
@@ -1257,294 +1415,324 @@ function PhotoSection({
 }
 
 // ============================================
-// RESULTS — AGE ONLY, hidden when empty
+// RESULTS
 // ============================================
 
-type ResultCard = {
-  key: string;
-  url: string;
-  age: number | null;
-  isFresh: boolean;
-};
-
 function ResultsSection({
-  freshImages,
-  recentCreations,
-  latestCreationId,
-  detectedAge,
-  onViewAll,
+  resultImage,
+  originalImage,
+  templateName,
+  onDownload,
+  onTryAnother,
+  onShare,
+  downloading,
 }: {
-  freshImages: { url: string; age: number }[];
-  recentCreations: CreationItem[];
-  latestCreationId: string | null;
-  detectedAge: number | null;
-  onViewAll: () => void;
+  resultImage: string | null;
+  originalImage: string | null;
+  templateName: string | null;
+  onDownload: () => void;
+  onTryAnother: () => void;
+  onShare: () => void;
+  downloading: boolean;
 }) {
-  const [filter, setFilter] = React.useState<Filter>("All");
-  const [downloadingKey, setDownloadingKey] = React.useState<string | null>(
-    null
-  );
-  const [downloadingAll, setDownloadingAll] = React.useState(false);
-
-  const allCards = React.useMemo<ResultCard[]>(() => {
-    const cards: ResultCard[] = [];
-
-    // Fresh images from this session
-    freshImages.forEach((item, i) => {
-      cards.push({
-        key: `fresh-${i}`,
-        url: item.url,
-        age: item.age ?? null,
-        isFresh: true,
-      });
-    });
-
-    // Past AGE creations only (already pre-filtered in page)
-    recentCreations.forEach((c) => {
-      // Skip the one we just generated (already in freshImages)
-      if (latestCreationId && c.id === latestCreationId) return;
-
-      // Skip anything that isn't AGE (defensive — page filters too)
-      if (c.feature !== "AGE") return;
-
-      if (c.images && c.images.length > 0) {
-        const ages: number[] = Array.isArray(c.metadata?.ages)
-          ? c.metadata.ages
-          : [];
-        c.images.forEach((url, i) => {
-          cards.push({
-            key: `${c.id}-${i}`,
-            url,
-            age: ages[i] ?? null,
-            isFresh: false,
-          });
-        });
-      } else if (c.imageUrl) {
-        cards.push({
-          key: c.id,
-          url: c.imageUrl,
-          age: null,
-          isFresh: false,
-        });
-      }
-    });
-
-    return cards;
-  }, [freshImages, recentCreations, latestCreationId]);
-
-  const filtered = React.useMemo(() => {
-    if (filter === "All") return allCards;
-    return allCards.filter((c) => matchesFilter(c.age, filter));
-  }, [allCards, filter]);
-
-  const handleDownload = async (card: ResultCard) => {
-    setDownloadingKey(card.key);
-
-    const ext = card.url.match(/\.(png|jpg|jpeg|webp)(\?|$)/i)?.[1] || "png";
-    const filename = card.age
-      ? `lexa-age-${card.age}-${Date.now()}.${ext}`
-      : `lexa-age-${Date.now()}.${ext}`;
-
-    await downloadImage(card.url, filename);
-    setDownloadingKey(null);
-  };
-
-  const handleDownloadAll = async () => {
-    if (filtered.length === 0) return;
-    setDownloadingAll(true);
-    for (const card of filtered) {
-      const ext = card.url.match(/\.(png|jpg|jpeg|webp)(\?|$)/i)?.[1] || "png";
-      const filename = card.age
-        ? `lexa-age-${card.age}-${Date.now()}.${ext}`
-        : `lexa-age-${Date.now()}.${ext}`;
-      await downloadImage(card.url, filename);
-      await new Promise((r) => setTimeout(r, 300));
-    }
-    setDownloadingAll(false);
-  };
-
-  // 🚫 Nothing to show → render nothing (no empty placeholder box)
-  if (allCards.length === 0) return null;
+  if (!resultImage) return null;
 
   return (
     <div className="mx-auto w-full max-w-6xl pb-10">
-      <div
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
         className={cn(
-          "rounded-3xl border p-5 sm:p-6",
+          "rounded-3xl border p-4 sm:p-6",
           "border-[#E5E0D5] bg-[#FCFBF7]/80 backdrop-blur-xl",
           "dark:border-[#4A473F] dark:bg-[#262421]/80"
         )}
       >
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-[20px] font-extrabold tracking-tight text-[#2E2A24] dark:text-[#F7F5F0] sm:text-[22px]">
-              Your Ages, Revealed
-            </h2>
-            <p className="mt-0.5 text-[12px] font-medium text-[#8B8478] dark:text-[#B5B0A5]">
-              {freshImages.length > 0
-                ? `Generated ${freshImages.length} ages${
-                    detectedAge ? ` · Detected age ${detectedAge}` : ""
-                  }`
-                : "Your latest age creations"}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {filtered.length > 1 && (
-              <button
-                type="button"
-                onClick={handleDownloadAll}
-                disabled={downloadingAll}
-                className="hidden items-center gap-1 text-[12px] font-semibold text-[#D18A4A] transition-colors hover:text-[#B86F32] disabled:opacity-50 dark:text-[#D99A5B] sm:inline-flex"
-              >
-                {downloadingAll ? (
-                  <Loader2
-                    className="size-3.5 animate-spin"
-                    strokeWidth={2.5}
-                  />
-                ) : (
-                  <Download className="size-3.5" strokeWidth={2.5} />
-                )}
-                Download all
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onViewAll}
-              className="inline-flex shrink-0 items-center gap-1 text-[12px] font-semibold text-[#8B8478] transition-colors hover:text-[#D18A4A] dark:text-[#B5B0A5] dark:hover:text-[#D99A5B]"
-            >
-              <HistoryIcon className="size-3.5" strokeWidth={2.5} />
-              View all
-              <ArrowRight className="size-3.5" strokeWidth={2.5} />
-            </button>
-          </div>
+        <div className="mb-5">
+          <h2 className="text-[20px] font-extrabold tracking-tight text-[#2E2A24] dark:text-[#F7F5F0] sm:text-[24px]">
+            Your New Look
+          </h2>
+          <p className="mt-0.5 text-[12px] font-medium text-[#8B8478] dark:text-[#B5B0A5] sm:text-[13px]">
+            Same you. New outfit.
+          </p>
         </div>
 
-        {/* Filters */}
-        <div className="mb-4 flex flex-wrap gap-1.5">
-          {FILTERS.map((f) => {
-            const count =
-              f === "All"
-                ? allCards.length
-                : allCards.filter((c) => matchesFilter(c.age, f)).length;
-            const active = filter === f;
-            return (
-              <button
-                key={f}
-                type="button"
-                onClick={() => setFilter(f)}
-                disabled={count === 0 && f !== "All"}
-                className={cn(
-                  "rounded-full px-3 py-1.5 text-[11.5px] font-bold tracking-tight transition-all",
-                  active
-                    ? "bg-[#D99A5B]/15 text-[#D18A4A] ring-1 ring-[#D18A4A]/40 dark:text-[#D99A5B]"
-                    : "bg-[#FCFBF7]/50 text-[#8B8478] hover:bg-[#FDF4EB]/60 hover:text-[#2E2A24] dark:bg-[#262421]/50 dark:text-[#B5B0A5] dark:hover:text-[#F7F5F0]",
-                  count === 0 &&
-                    f !== "All" &&
-                    "cursor-not-allowed opacity-40 hover:bg-[#FCFBF7]/50 dark:hover:bg-[#262421]/50"
-                )}
-              >
-                {f}
-                {count > 0 && (
-                  <span className="ml-1.5 text-[10px] opacity-60">
-                    {count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        {filtered.length > 0 ? (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
-            {filtered.map((card, i) => (
-              <motion.div
-                key={card.key}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{
-                  duration: 0.4,
-                  delay: Math.min(i * 0.04, 0.5),
-                }}
-                className={cn(
-                  "group relative overflow-hidden rounded-2xl border",
-                  "border-[#E5E0D5] bg-[#FCFBF7] dark:border-[#4A473F] dark:bg-[#262421]",
-                  "transition-all duration-300 hover:border-[#D18A4A]/50 dark:hover:border-[#D99A5B]/50"
-                )}
-              >
-                <div className="aspect-[4/5] w-full overflow-hidden">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={card.url}
-                    alt={card.age ? `Age ${card.age}` : "Creation"}
-                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    draggable={false}
-                    loading="lazy"
+        <div className="grid grid-cols-1 items-center gap-4 sm:grid-cols-[1fr_auto_1fr] sm:gap-5">
+          <div className="relative">
+            <span className="absolute left-3 top-3 z-10 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-white backdrop-blur-md">
+              Before
+            </span>
+            <div className="aspect-[4/5] w-full overflow-hidden rounded-2xl border border-[#E5E0D5] bg-[#F7F7F2] dark:border-[#4A473F] dark:bg-[#1A1918]">
+              {originalImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={originalImage}
+                  alt="Before"
+                  className="h-full w-full object-cover"
+                  draggable={false}
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center">
+                  <ImageIcon
+                    className="size-8 text-[#8B8478]/40"
+                    strokeWidth={1.5}
                   />
                 </div>
+              )}
+            </div>
+          </div>
 
-                {card.age != null && card.age > 0 && (
-                  <div className="absolute left-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-extrabold text-white backdrop-blur-md">
-                    Age {card.age}
-                  </div>
-                )}
+          <div className="flex justify-center">
+            <div
+              className={cn(
+                "flex size-10 items-center justify-center rounded-full",
+                "bg-gradient-to-br from-[#D99A5B] to-[#B86F32] text-white",
+                "shadow-[0_8px_20px_-4px_rgba(217,154,91,0.5)]"
+              )}
+            >
+              <ArrowRight className="size-5" strokeWidth={2.5} />
+            </div>
+          </div>
 
-                {card.isFresh && (
-                  <div
-                    className={cn(
-                      "absolute right-2 top-2 flex items-center gap-1 rounded-full px-2 py-0.5",
-                      "bg-gradient-to-r from-[#4CAF50] to-[#2E7D32]",
-                      "text-[9.5px] font-extrabold uppercase tracking-wide text-white",
-                      "shadow-[0_4px_12px_rgba(76,175,80,0.5)]"
-                    )}
-                  >
-                    <Sparkles
-                      className="size-2.5"
-                      strokeWidth={3}
-                      fill="currentColor"
-                    />
-                    New
-                  </div>
-                )}
+          <div className="relative">
+            <span className="absolute left-3 top-3 z-10 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-white backdrop-blur-md">
+              After
+            </span>
+            <span
+              className={cn(
+                "absolute right-3 top-3 z-10 inline-flex items-center gap-1 rounded-full px-2 py-0.5",
+                "bg-gradient-to-r from-[#4CAF50] to-[#2E7D32]",
+                "text-[10px] font-extrabold uppercase tracking-wider text-white",
+                "shadow-[0_4px_12px_rgba(76,175,80,0.5)]"
+              )}
+            >
+              <CheckCircle2 className="size-2.5" strokeWidth={3} />
+              Ready
+            </span>
+            <div className="aspect-[4/5] w-full overflow-hidden rounded-2xl border border-[#D18A4A]/50 bg-[#F7F7F2] dark:border-[#D99A5B]/50 dark:bg-[#1A1918]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={resultImage}
+                alt="After"
+                className="h-full w-full object-cover"
+                draggable={false}
+              />
+            </div>
+          </div>
+        </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleDownload(card)}
-                  disabled={downloadingKey === card.key}
-                  aria-label="Download"
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={onDownload}
+            disabled={downloading}
+            className={cn(
+              "group inline-flex flex-1 items-center justify-center gap-2 rounded-full px-5 py-3",
+              "bg-gradient-to-r from-[#D99A5B] to-[#B86F32] text-white",
+              "text-[13px] font-bold tracking-tight",
+              "shadow-[0_10px_24px_-8px_rgba(217,154,91,0.6)]",
+              "transition-all duration-300 hover:-translate-y-0.5",
+              "disabled:opacity-70 disabled:cursor-not-allowed"
+            )}
+          >
+            {downloading ? (
+              <>
+                <Loader2 className="size-4 animate-spin" strokeWidth={2.5} />
+                <span>Downloading...</span>
+              </>
+            ) : (
+              <>
+                <Download className="size-4" strokeWidth={2.5} />
+                <span>Download</span>
+              </>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={onTryAnother}
+            className={cn(
+              "group inline-flex flex-1 items-center justify-center gap-2 rounded-full border px-5 py-3",
+              "border-[#E5E0D5] bg-transparent text-[#2E2A24]",
+              "dark:border-[#4A473F] dark:text-[#F7F5F0]",
+              "text-[13px] font-bold tracking-tight",
+              "transition-all duration-300 hover:-translate-y-0.5",
+              "hover:border-[#D18A4A]/50 hover:bg-[#FDF4EB]",
+              "dark:hover:border-[#D99A5B]/50 dark:hover:bg-[#33312D]"
+            )}
+          >
+            <RefreshCw
+              className="size-4 transition-transform duration-500 group-hover:rotate-180"
+              strokeWidth={2.5}
+            />
+            <span>Try Another Outfit</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onShare}
+            className={cn(
+              "inline-flex items-center justify-center gap-2 rounded-full border px-5 py-3",
+              "border-[#E5E0D5] bg-transparent text-[#8B8478]",
+              "dark:border-[#4A473F] dark:text-[#B5B0A5]",
+              "text-[13px] font-bold tracking-tight",
+              "transition-all duration-300 hover:-translate-y-0.5",
+              "hover:border-[#D18A4A]/50 hover:text-[#D18A4A]",
+              "dark:hover:border-[#D99A5B]/50 dark:hover:text-[#D99A5B]"
+            )}
+          >
+            <Share2 className="size-4" strokeWidth={2.5} />
+            <span>Share</span>
+          </button>
+        </div>
+
+        <p className="mt-3 text-center text-[11px] font-medium text-[#8B8478] dark:text-[#B5B0A5]">
+          Saved to your history ·{" "}
+          {templateName ? `"${templateName}" · ` : ""}
+          {FLAT_COST} credit{FLAT_COST > 1 ? "s" : ""} used
+        </p>
+      </motion.div>
+    </div>
+  );
+}
+
+// ============================================
+// RECENT CREATIONS
+// ============================================
+
+function RecentSection({
+  creations,
+  onViewAll,
+}: {
+  creations: CreationItem[];
+  onViewAll: () => void;
+}) {
+  const [downloadingId, setDownloadingId] = React.useState<string | null>(null);
+
+  if (creations.length === 0) return null;
+
+  const handleDownloadCreation = async (c: CreationItem) => {
+    const url = c.imageUrl;
+    if (!url) return;
+
+    setDownloadingId(c.id);
+
+    const ext = url.match(/\.(png|jpg|jpeg|webp)(\?|$)/i)?.[1] || "png";
+    const name = (c.metadata as any)?.outfitTemplateName ?? "outfit";
+    const safe = String(name)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
+    const filename = `lexa-${safe || "outfit"}-${Date.now()}.${ext}`;
+
+    await downloadImage(url, filename);
+    setDownloadingId(null);
+  };
+
+  return (
+    <div className="mx-auto w-full max-w-6xl pb-8">
+      <div className="mb-4 flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-[18px] font-extrabold tracking-tight text-[#2E2A24] dark:text-[#F7F5F0] sm:text-[20px]">
+            Recent Outfits
+          </h2>
+          <p className="mt-0.5 text-[11.5px] font-medium text-[#8B8478] dark:text-[#B5B0A5]">
+            Tap an image to download
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onViewAll}
+          className="inline-flex shrink-0 items-center gap-1 text-[12px] font-bold text-[#D18A4A] transition-colors hover:text-[#B86F32] dark:text-[#D99A5B]"
+        >
+          View all <ArrowRight className="size-3.5" strokeWidth={2.5} />
+        </button>
+      </div>
+
+      <div
+        className="flex gap-3 overflow-x-auto pb-2"
+        style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+      >
+        {creations.map((c) => {
+          const url = c.imageUrl;
+          if (!url) return null;
+
+          const isDownloading = downloadingId === c.id;
+
+          return (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => handleDownloadCreation(c)}
+              disabled={isDownloading}
+              aria-label="Download this outfit creation"
+              className={cn(
+                "group flex w-[150px] shrink-0 flex-col rounded-2xl border p-2 text-left sm:w-[170px]",
+                "border-[#E5E0D5] bg-[#FCFBF7]",
+                "dark:border-[#4A473F] dark:bg-[#262421]",
+                "transition-all duration-300 hover:-translate-y-0.5",
+                "hover:border-[#D18A4A]/50 hover:shadow-[0_8px_20px_rgba(217,154,91,0.12)]",
+                "dark:hover:border-[#D99A5B]/50",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D18A4A]",
+                "disabled:cursor-not-allowed"
+              )}
+            >
+              <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-[#F7F7F2] dark:bg-[#1A1918]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={url}
+                  alt="Outfit creation"
+                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  draggable={false}
+                  loading="lazy"
+                />
+
+                <div
                   className={cn(
-                    "absolute bottom-2 right-2 flex size-7 items-center justify-center rounded-full",
-                    "bg-black/60 text-white backdrop-blur-md",
-                    "opacity-0 transition-all duration-200 group-hover:opacity-100",
-                    "hover:bg-black/80 hover:scale-105",
-                    "disabled:opacity-50 disabled:cursor-not-allowed"
+                    "pointer-events-none absolute inset-0 flex items-center justify-center",
+                    "bg-black/40 opacity-0 backdrop-blur-[1px]",
+                    "transition-opacity duration-300 group-hover:opacity-100"
                   )}
                 >
-                  {downloadingKey === card.key ? (
-                    <Loader2
-                      className="size-3.5 animate-spin"
-                      strokeWidth={2.5}
-                    />
-                  ) : (
-                    <Download className="size-3.5" strokeWidth={2.5} />
-                  )}
-                </button>
-              </motion.div>
-            ))}
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-[#E5E0D5] py-10 dark:border-[#4A473F]">
-            <p className="text-[12px] font-medium text-[#8B8478] dark:text-[#B5B0A5]">
-              No age creations in this range
-            </p>
-            <button
-              type="button"
-              onClick={() => setFilter("All")}
-              className="text-[11px] font-bold text-[#D18A4A] hover:underline dark:text-[#D99A5B]"
-            >
-              Show all
+                  <span
+                    className={cn(
+                      "flex size-9 items-center justify-center rounded-full",
+                      "bg-gradient-to-br from-[#D99A5B] to-[#B86F32] text-white",
+                      "shadow-[0_8px_20px_rgba(0,0,0,0.4)]"
+                    )}
+                  >
+                    {isDownloading ? (
+                      <Loader2
+                        className="size-4 animate-spin"
+                        strokeWidth={2.5}
+                      />
+                    ) : (
+                      <Download className="size-4" strokeWidth={2.5} />
+                    )}
+                  </span>
+                </div>
+
+                {isDownloading && (
+                  <div className="absolute right-2 top-2 flex size-6 items-center justify-center rounded-full bg-black/70 text-white backdrop-blur-md">
+                    <Loader2 className="size-3 animate-spin" strokeWidth={3} />
+                  </div>
+                )}
+              </div>
+              <div className="mt-2 px-0.5">
+                <p className="text-[10px] font-bold text-[#2E2A24] dark:text-[#F7F5F0]">
+                  {new Date(c.createdAt).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </p>
+                <p className="truncate text-[9.5px] font-medium text-[#8B8478] dark:text-[#B5B0A5]">
+                  {(c.metadata as any)?.outfitTemplateName ?? "Outfit"}
+                </p>
+              </div>
             </button>
-          </div>
-        )}
+          );
+        })}
       </div>
     </div>
   );
@@ -1556,10 +1744,10 @@ function ResultsSection({
 
 function TrustStrip() {
   const items = [
-    { icon: Sparkles, title: "Full Progression", sub: "12 → 70 years" },
-    { icon: Zap, title: "Instant Results", sub: "Ready in ~60-120 seconds" },
-    { icon: Sparkles, title: "Premium Quality", sub: "Lifelike aging detail" },
-    { icon: Lock, title: "For Everyone", sub: "Private & secure" },
+    { icon: Sparkles, title: "12+ Outfits", sub: "Curated traditional wear" },
+    { icon: Zap, title: "Instant", sub: "Ready in ~15 seconds" },
+    { icon: Camera, title: "Full Body", sub: "Head-to-toe realism" },
+    { icon: Lock, title: "Private", sub: "Photos are never stored" },
   ];
 
   return (

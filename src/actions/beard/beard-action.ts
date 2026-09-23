@@ -1,4 +1,4 @@
-// src/actions/agestudio/age-studio-action.ts
+// src/actions/beard/beard-action.ts
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
@@ -12,16 +12,24 @@ import { uploadYouCamResult } from "@/lib/images/upload-youcam-result";
 // CONFIG
 // ═══════════════════════════════════════════════════════════
 
-const USER_CREDITS_COST = getFeatureCost("AGE"); // → 2
-const YOUCAM_CREDITS_COST = getFeatureCost("AGE"); // → 2
-const YOUCAM_ENDPOINT = "aging";
+// 👤 What the USER pays
+const USER_CREDITS_COST = getFeatureCost("BEARD"); // → 1
+
+// 🔑 What YOUCAM charges our key (AI Beard Style = 2 units)
+const YOUCAM_CREDITS_COST = 2;
+
+const YOUCAM_ENDPOINT = "beard-style";
 const TASK_TIMEOUT_MS = 5 * 60 * 1000; // 5 min
 
 // ═══════════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════════
 
-type StartAgeSimulatorInput = { imageUrl: string };
+type StartBeardInput = {
+  imageUrl: string;
+  beardTemplateId: string; // 🎯 comes from UI (from getBeardTemplates)
+  beardTemplateName?: string; // optional — for nicer history display
+};
 
 type StartResult =
   | { success: true; creationId: string; taskId: string; userCost: number }
@@ -29,28 +37,35 @@ type StartResult =
 
 type StatusResult =
   | { success: true; status: "PROCESSING" }
-  | {
-      success: true;
-      status: "COMPLETED";
-      images: { url: string; age: number }[];
-      detectedAge?: number;
-    }
+  | { success: true; status: "COMPLETED"; imageUrl: string }
   | { success: true; status: "FAILED" }
   | { success: false; error: string };
 
 // ═══════════════════════════════════════════════════════════
-// START AGE SIMULATOR
+// START BEARD STYLE
 // ═══════════════════════════════════════════════════════════
 
-export async function startAgeSimulator({
+export async function startBeardStyle({
   imageUrl,
-}: StartAgeSimulatorInput): Promise<StartResult> {
+  beardTemplateId,
+  beardTemplateName,
+}: StartBeardInput): Promise<StartResult> {
   try {
+    // ─── 1. AUTH ───
     const { userId: clerkId } = await auth();
     if (!clerkId) {
       return { success: false, error: "You must be signed in." };
     }
 
+    // ─── 2. VALIDATE INPUT ───
+    if (!imageUrl || typeof imageUrl !== "string") {
+      return { success: false, error: "Please upload a photo first." };
+    }
+    if (!beardTemplateId || typeof beardTemplateId !== "string") {
+      return { success: false, error: "Please select a beard style." };
+    }
+
+    // ─── 3. GET USER + CHECK CREDITS ───
     const dbUser = await prisma.user.findUnique({
       where: { clerkId },
       select: { id: true, credits: true },
@@ -67,46 +82,58 @@ export async function startAgeSimulator({
       };
     }
 
-    if (!imageUrl) {
-      return { success: false, error: "Please upload a photo first." };
-    }
+    // ─── 4. START YOUCAM TASK ───
+    console.log("");
+    console.log("══════════════════════════════════════════════");
+    console.log("🧔 LEXA AI — BEARD STUDIO (YouCam)");
+    console.log("══════════════════════════════════════════════");
+    console.log(`👤 User image: ${imageUrl}`);
+    console.log(`🧔 Template ID: ${beardTemplateId}`);
+    console.log(`🧔 Template Name: ${beardTemplateName ?? "(none)"}`);
+    console.log(`⚙️  Endpoint: ${YOUCAM_ENDPOINT}`);
+    console.log(`💰 YouCam cost: ${YOUCAM_CREDITS_COST} units`);
 
     let taskId: string;
     try {
       taskId = await startTask(
         YOUCAM_ENDPOINT,
-        { src_file_url: imageUrl },
-        YOUCAM_CREDITS_COST
+        {
+          src_file_url: imageUrl,
+          template_id: beardTemplateId, // 🎯 straight from UI → YouCam
+        },
+        YOUCAM_CREDITS_COST // 👈 deducts 2 from YouCam key
       );
-      console.log("[startAgeSimulator] ✅ Task started:", taskId);
+      console.log("[startBeardStyle] ✅ Task started:", taskId);
     } catch (err: any) {
-      console.error("[startAgeSimulator] YouCam error:", err.message);
+      console.error("[startBeardStyle] YouCam error:", err.message);
       return {
         success: false,
         error: "Could not start generation. Please try again.",
       };
     }
 
+    // ─── 5. SAVE CREATION ───
     const creation = await prisma.creation.create({
       data: {
         userId: dbUser.id,
-        feature: "AGE",
+        feature: "BEARD",
         originalImageUrl: imageUrl,
         taskId,
         status: "PROCESSING",
-        creditsUsed: USER_CREDITS_COST,
+        creditsUsed: USER_CREDITS_COST, // 👈 1 — what user pays
         imageUrl: null,
-        images: [],
         metadata: {
           provider: "youcam",
           youcamCost: YOUCAM_CREDITS_COST,
           endpoint: YOUCAM_ENDPOINT,
+          beardTemplateId,
+          beardTemplateName: beardTemplateName ?? null,
         },
       },
     });
 
     console.log(
-      `[startAgeSimulator] ✅ Creation saved: ${creation.id} (user: ${USER_CREDITS_COST}, youcam: ${YOUCAM_CREDITS_COST})`
+      `[startBeardStyle] ✅ Creation saved: ${creation.id} (user: ${USER_CREDITS_COST}, youcam: ${YOUCAM_CREDITS_COST})`
     );
 
     return {
@@ -116,7 +143,7 @@ export async function startAgeSimulator({
       userCost: USER_CREDITS_COST,
     };
   } catch (err: any) {
-    console.error("[startAgeSimulator] 💥 Error:", err.message);
+    console.error("[startBeardStyle] 💥 Error:", err.message);
     return {
       success: false,
       error: "Something went wrong. Please try again.",
@@ -128,7 +155,7 @@ export async function startAgeSimulator({
 // CHECK STATUS
 // ═══════════════════════════════════════════════════════════
 
-export async function checkAgeSimulatorStatus({
+export async function checkBeardStyleStatus({
   creationId,
 }: {
   creationId: string;
@@ -144,18 +171,10 @@ export async function checkAgeSimulatorStatus({
 
     // ─── Already COMPLETED ───
     if (creation.status === "COMPLETED") {
-      const meta = creation.metadata as any;
-      const ages: number[] = Array.isArray(meta?.ages) ? meta.ages : [];
-      const images = (creation.images ?? []).map((url, i) => ({
-        url,
-        age: ages[i] ?? 0,
-      }));
-
       return {
         success: true,
         status: "COMPLETED",
-        images,
-        detectedAge: meta?.detectedAge,
+        imageUrl: creation.imageUrl || "",
       };
     }
 
@@ -165,8 +184,8 @@ export async function checkAgeSimulatorStatus({
     }
 
     // ─── Timeout check ───
-    const ageMs = Date.now() - creation.createdAt.getTime();
-    if (ageMs > TASK_TIMEOUT_MS) {
+    const age = Date.now() - creation.createdAt.getTime();
+    if (age > TASK_TIMEOUT_MS) {
       await prisma.creation.update({
         where: { id: creation.id },
         data: { status: "FAILED" },
@@ -179,23 +198,11 @@ export async function checkAgeSimulatorStatus({
     try {
       youCamResult = await checkTaskStatus(YOUCAM_ENDPOINT, creation.taskId);
     } catch (err: any) {
-      console.error("[checkAgeSimulatorStatus] YouCam error:", err.message);
+      console.error("[checkBeardStyleStatus] YouCam error:", err.message);
       return { success: true, status: "PROCESSING" };
     }
 
-    // 🆕 Debug log — helps us see the actual response shape
-    console.log("[checkAgeSimulatorStatus] YouCam status:", {
-      status: youCamResult.status,
-      hasResults: !!youCamResult.results,
-      outputCount: Array.isArray(youCamResult.results?.output)
-        ? youCamResult.results.output.length
-        : 0,
-      firstItem: Array.isArray(youCamResult.results?.output)
-        ? JSON.stringify(youCamResult.results.output[0]).slice(0, 200)
-        : null,
-    });
-
-    // 🎯 Normalize status (YouCam returns "running" | "success" | "error")
+    // 🎯 Normalize status (YouCam: "running" | "success" | "error")
     const normalized = String(youCamResult.status ?? "").toLowerCase();
 
     // ─── Not done yet ───
@@ -214,22 +221,21 @@ export async function checkAgeSimulatorStatus({
 
     // ─── SUCCESS ───
     if (normalized !== "success" && normalized !== "completed") {
-      // Unknown status — treat as still processing
       return { success: true, status: "PROCESSING" };
     }
 
-    const results = youCamResult.results;
+    // 🎯 Extract YouCam's TEMPORARY URL (expires in 2h)
+    const youCamTempUrl =
+      youCamResult.results?.image_url ||
+      youCamResult.results?.url ||
+      (Array.isArray(youCamResult.results)
+        ? youCamResult.results[0]?.url
+        : null);
 
-    // 🎯 EXACT SHAPE from official docs:
-    // results.output = [{ url: string, res_age: number }]
-    const rawOutput: any[] = Array.isArray(results?.output)
-      ? results.output
-      : [];
-
-    if (rawOutput.length === 0) {
+    if (!youCamTempUrl) {
       console.error(
-        "[checkAgeSimulatorStatus] No output array in results:",
-        results
+        "[checkBeardStyleStatus] No image URL in results:",
+        youCamResult.results
       );
       await prisma.creation.update({
         where: { id: creation.id },
@@ -238,111 +244,58 @@ export async function checkAgeSimulatorStatus({
       return { success: true, status: "FAILED" };
     }
 
-    // 🎯 Extract each item using correct field names
-    const extracted: { tempUrl: string; age: number }[] = [];
+    // ═══════════════════════════════════════════════════
+    // 🎯 CRITICAL: Download from YouCam + Upload to OUR S3
+    // ═══════════════════════════════════════════════════
+    let permanentUrl: string;
 
-    for (const item of rawOutput) {
-      if (!item) continue;
+    try {
+      const fileName = creation.originalImageUrl
+        ? creation.originalImageUrl.split("/").pop()?.split(".")[0]
+        : "beard";
 
-      // Handle both object { url, res_age } and plain string URL
-      const tempUrl =
-        typeof item === "string" ? item : item?.url ?? null;
-
-      // 🎯 Age field is "res_age" — NOT "age"
-      const itemAge =
-        typeof item === "object" && item?.res_age != null
-          ? Number(item.res_age)
-          : 0;
-
-      if (tempUrl) {
-        extracted.push({ tempUrl, age: itemAge });
-      }
-    }
-
-    if (extracted.length === 0) {
-      await prisma.creation.update({
-        where: { id: creation.id },
-        data: { status: "FAILED" },
+      const uploaded = await uploadYouCamResult({
+        youCamUrl: youCamTempUrl,
+        fileName: `${fileName || "beard"}-beard-${Date.now()}`,
+        feature: "beard-studio/results",
       });
-      return { success: true, status: "FAILED" };
+
+      permanentUrl = uploaded.url;
+
+      console.log(
+        `[checkBeardStyleStatus] ✅ Re-uploaded to our S3: ${permanentUrl}`
+      );
+    } catch (uploadErr: any) {
+      console.error(
+        "[checkBeardStyleStatus] S3 re-upload failed:",
+        uploadErr.message
+      );
+
+      // ⚠️ Fallback: Save YouCam URL anyway (works for 2h)
+      permanentUrl = youCamTempUrl;
+      console.warn(
+        "[checkBeardStyleStatus] ⚠️ Using temporary YouCam URL as fallback"
+      );
     }
 
-    // Sort by age ascending
-    extracted.sort((a, b) => a.age - b.age);
-
-    // ─── Upload each to our S3 (parallel) ───
-    const sourceName =
-      creation.originalImageUrl?.split("/").pop()?.split(".")[0] ?? "age";
-
-    const uploadResults = await Promise.allSettled(
-      extracted.map((item, i) =>
-        uploadYouCamResult({
-          youCamUrl: item.tempUrl,
-          fileName: `${sourceName}-age-${item.age || i}`,
-          feature: "age-studio/results",
-        })
-      )
-    );
-
-    const finalImages: { url: string; age: number }[] = [];
-    const failedUploads: number[] = [];
-
-    uploadResults.forEach((r, i) => {
-      if (r.status === "fulfilled") {
-        finalImages.push({
-          url: r.value.url,
-          age: extracted[i].age,
-        });
-      } else {
-        failedUploads.push(extracted[i].age);
-        console.error(
-          `[checkAgeSimulatorStatus] Upload ${i + 1} failed:`,
-          r.reason
-        );
-      }
-    });
-
-    if (finalImages.length === 0) {
-      await prisma.creation.update({
-        where: { id: creation.id },
-        data: { status: "FAILED" },
-      });
-      return { success: true, status: "FAILED" };
-    }
-
-    // Sort final by age
-    finalImages.sort((a, b) => a.age - b.age);
-
-    const imageUrls = finalImages.map((x) => x.url);
-    const successAges = finalImages.map((x) => x.age);
-
-    // Detected age — comes from results.age (NOT output.res_age)
-    const detectedAge =
-      typeof results?.age === "number" ? results.age : null;
-
-    // ─── Update Creation ───
+    // ─── Save result to DB ───
     await prisma.creation.update({
       where: { id: creation.id },
       data: {
         status: "COMPLETED",
-        images: imageUrls,
+        imageUrl: permanentUrl,
         metadata: {
           ...((creation.metadata as object) || {}),
-          ages: successAges,
-          imageCount: imageUrls.length,
-          detectedAge,
-          agdIdx: results?.agd_idx ?? null,
-          youcamAgeMin: results?.age_min ?? null,
-          youcamAgeMax: results?.age_max ?? null,
-          numOfPhotos: results?.num_of_photos ?? imageUrls.length,
-          ...(failedUploads.length > 0 && { failedUploads }),
-          provider: "youcam",
-          endpoint: YOUCAM_ENDPOINT,
+          youcamResult: youCamResult.results,
+          youcamOriginalUrl: youCamTempUrl,
+          reuploadedToS3: permanentUrl.startsWith(
+            process.env.AWS_CLOUDFRONT_URL || "https://"
+          ),
         },
       },
     });
 
-    // ─── Deduct credits ───
+    // 🎯 Deduct USER credits
     await prisma.user.update({
       where: { id: creation.userId },
       data: {
@@ -358,28 +311,23 @@ export async function checkAgeSimulatorStatus({
         reason: "USAGE",
         metadata: {
           creationId: creation.id,
-          feature: "AGE",
-          ages: successAges,
+          feature: "BEARD",
           provider: "youcam",
-          detectedAge,
         },
       },
     });
 
     revalidateUserData();
 
-    console.log(
-      `[checkAgeSimulatorStatus] ✅ Complete: ${imageUrls.length} images, ages [${successAges.join(", ")}]`
-    );
+    console.log(`[checkBeardStyleStatus] ✅ Complete: ${permanentUrl}`);
 
     return {
       success: true,
       status: "COMPLETED",
-      images: finalImages,
-      detectedAge: detectedAge ?? undefined,
+      imageUrl: permanentUrl,
     };
   } catch (err: any) {
-    console.error("[checkAgeSimulatorStatus] 💥 Error:", err.message);
+    console.error("[checkBeardStyleStatus] 💥 Error:", err.message);
     return { success: true, status: "PROCESSING" };
   }
 }

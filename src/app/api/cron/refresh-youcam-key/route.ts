@@ -2,16 +2,8 @@
 import { NextResponse } from "next/server";
 import { refreshActiveYouCamKey } from "@/lib/youcam/key-manager";
 
-// ═══════════════════════════════════════════════════════════
-// YOucam KEY REFRESH CRON
-// ═══════════════════════════════════════════════════════════
-// Purpose: Every 30 minutes, re-check all YouCam keys and pick
-//          the best one (highest remaining credits).
-//
-// Called by: cron-job.org
-// Schedule: Every 30 minutes
-// Security: Requires Authorization: Bearer ${CRON_SECRET}
-// ═══════════════════════════════════════════════════════════
+// 🚨 Removed: `export const runtime = "nodejs";`
+// 🚨 Removed: `export const maxDuration = 60;`
 
 export async function GET(request: Request) {
   const startedAt = Date.now();
@@ -19,7 +11,6 @@ export async function GET(request: Request) {
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   console.log("[KEY-REFRESH] 🔔 Triggered at", new Date().toISOString());
 
-  // ─── Auth check ───────────────────────────────────────────
   const authHeader = request.headers.get("authorization");
   const expectedAuth = `Bearer ${process.env.CRON_SECRET}`;
 
@@ -30,7 +21,6 @@ export async function GET(request: Request) {
 
   console.log("[KEY-REFRESH] ✅ Auth verified");
 
-  // ─── Refresh keys ─────────────────────────────────────────
   try {
     const result = await refreshActiveYouCamKey();
     const duration = Date.now() - startedAt;
@@ -52,7 +42,6 @@ export async function GET(request: Request) {
       });
     }
 
-    // No keys available
     console.error(`[KEY-REFRESH] ❌ ${result.error}`);
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
@@ -71,17 +60,12 @@ export async function GET(request: Request) {
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
     return NextResponse.json(
-      {
-        ok: false,
-        error: err.message,
-        duration: `${duration}ms`,
-      },
+      { ok: false, error: err.message, duration: `${duration}ms` },
       { status: 500 }
     );
   }
 }
 
-// Support POST (some cron services use POST by default)
 export async function POST(request: Request) {
   return GET(request);
 }

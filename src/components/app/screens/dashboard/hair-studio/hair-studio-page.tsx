@@ -15,17 +15,27 @@ import {
   CheckCircle2,
   Download,
   RefreshCw,
+  ArrowRight,
+  Crown,
 } from "lucide-react";
+import { useUser } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
 import { HairStudioBack } from "./hair-studio-back";
 import { HairStudioHeader } from "./hair-studio-header";
 import { HairStyleGallery } from "./hair-style-gallery";
 import { HairTemplate, hairTemplates } from "@/data/hair-templetes";
 import { uploadHairStyleAction } from "@/actions/images/uplaod-hair-style-action";
-import { checkHairStyleStatus, startHairStyle } from "@/actions/youcam/hair-studio";
+import {
+  checkHairStyleStatus,
+  startHairStyle,
+} from "@/actions/youcam/hair-studio";
+import {
+  getUserAction,
+  type CreationItem,
+} from "@/actions/users/get-user-action";
 
 // ============================================
-// LOADING MESSAGES
+// CONFIG
 // ============================================
 
 const LOADING_MESSAGES = [
@@ -35,6 +45,8 @@ const LOADING_MESSAGES = [
   "Adding finishing touches...",
   "Almost done...",
 ];
+
+const FLAT_COST = 1;
 
 // ============================================
 // DOWNLOAD HELPER
@@ -75,8 +87,17 @@ async function downloadImage(imageUrl: string, filename: string) {
 
 export default function HairStudioPage() {
   const router = useRouter();
+  const { isSignedIn, isLoaded } = useUser();
 
-  const [selectedStyle, setSelectedStyle] = React.useState<HairTemplate | null>(null);
+  // User credits + recent creations
+  const [credits, setCredits] = React.useState<number | null>(null);
+  const [creditsLoading, setCreditsLoading] = React.useState(true);
+  const [recentCreations, setRecentCreations] = React.useState<CreationItem[]>(
+    []
+  );
+
+  const [selectedStyle, setSelectedStyle] =
+    React.useState<HairTemplate | null>(null);
 
   const [uploadedFile, setUploadedFile] = React.useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
@@ -94,6 +115,50 @@ export default function HairStudioPage() {
   const [isDownloading, setIsDownloading] = React.useState(false);
 
   const [userDataRefreshKey, setUserDataRefreshKey] = React.useState(0);
+
+  // ─── Derived credit state ───
+  const userCredits = credits ?? 0;
+  const creditsKnown = !creditsLoading && credits !== null;
+  const hasCredits = !creditsKnown || userCredits >= FLAT_COST;
+  // When credits are 0 (known), lock the whole upload flow
+  const creditLock = creditsKnown && userCredits < FLAT_COST;
+
+  // ─── Fetch credits + recent creations ───
+  React.useEffect(() => {
+    let cancelled = false;
+    async function fetchData() {
+      if (!isLoaded || !isSignedIn) {
+        setCreditsLoading(false);
+        return;
+      }
+      setCreditsLoading(true);
+      try {
+        const result = await getUserAction({ creationsLimit: 8 });
+        if (cancelled) return;
+
+        if (result.success) {
+          setCredits(result.user.credits);
+          setRecentCreations(
+            result.creations.filter((c) => c.feature === "HAIRSTYLE")
+          );
+        } else {
+          setCredits(0);
+          setRecentCreations([]);
+        }
+      } catch {
+        if (!cancelled) {
+          setCredits(0);
+          setRecentCreations([]);
+        }
+      } finally {
+        if (!cancelled) setCreditsLoading(false);
+      }
+    }
+    fetchData();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, isSignedIn, userDataRefreshKey]);
 
   React.useEffect(() => {
     return () => {
@@ -119,6 +184,12 @@ export default function HairStudioPage() {
   }, [isGenerating]);
 
   const handleFileSelect = async (file: File) => {
+    // 🛡️ Guard: no credits → no API call
+    if (creditLock) {
+      setError("You need credits to upload a photo.");
+      return;
+    }
+
     if (previewUrl) URL.revokeObjectURL(previewUrl);
 
     const newPreviewUrl = URL.createObjectURL(file);
@@ -167,6 +238,10 @@ export default function HairStudioPage() {
 
   const handleGenerate = async () => {
     if (!uploadedUrl || !selectedStyle) return;
+    if (creditLock) {
+      setError("You're out of credits. Please upgrade to continue.");
+      return;
+    }
 
     setIsGenerating(true);
     setError(null);
@@ -252,14 +327,68 @@ export default function HairStudioPage() {
     !!selectedStyle &&
     uploadSuccess &&
     !isUploading &&
-    !isGenerating;
+    !isGenerating &&
+    !creditLock;
+
+  // ============================================
+  // RENDER
+  // ============================================
 
   return (
     <div className="flex min-h-screen flex-col">
       <HairStudioBack refreshKey={userDataRefreshKey} />
       <HairStudioHeader />
 
-      <div className="mx-auto w-full max-w-7xl flex-1 px-4 pb-16 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-7xl flex-1 pb-16">
+        {/* LOW CREDIT WARNING */}
+        <AnimatePresence>
+          {creditLock && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className={cn(
+                "mb-5 flex flex-col items-start gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center sm:justify-between",
+                "border-[#D18A4A]/40 bg-[#D99A5B]/5",
+                "dark:border-[#D99A5B]/40 dark:bg-[#D99A5B]/8"
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className={cn(
+                    "flex size-9 shrink-0 items-center justify-center rounded-full",
+                    "bg-[#D99A5B]/15 text-[#D18A4A] dark:text-[#D99A5B]"
+                  )}
+                >
+                  <Crown className="size-4" strokeWidth={2.5} />
+                </div>
+                <div>
+                  <p className="text-[13px] font-extrabold tracking-tight text-[#2E2A24] dark:text-[#F7F5F0]">
+                    You're out of credits
+                  </p>
+                  <p className="mt-0.5 text-[11.5px] font-medium text-[#8B8478] dark:text-[#B5B0A5]">
+                    Upgrade to upload photos and generate hairstyles.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => router.push("/pricing")}
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2",
+                  "bg-gradient-to-r from-[#D99A5B] to-[#B86F32] text-white",
+                  "text-[12px] font-bold tracking-tight",
+                  "shadow-[0_8px_20px_-6px_rgba(217,154,91,0.6)]",
+                  "transition-all duration-300 hover:-translate-y-0.5"
+                )}
+              >
+                <Crown className="size-3.5" strokeWidth={2.5} />
+                Upgrade now
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="grid gap-6 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)] lg:gap-8">
           {/* LEFT COLUMN */}
           <div className="flex flex-col gap-5 lg:sticky lg:top-6 lg:self-start">
@@ -271,6 +400,7 @@ export default function HairStudioPage() {
                 uploadSuccess={uploadSuccess}
                 uploadError={uploadError}
                 uploadedSize={uploadedSize}
+                disabled={creditLock}
                 onFileSelect={handleFileSelect}
                 onRemove={handleRemoveFile}
               />
@@ -319,18 +449,27 @@ export default function HairStudioPage() {
 
                 {isGenerating ? (
                   <>
-                    <Loader2 className="size-4 animate-spin" strokeWidth={2.5} />
+                    <Loader2
+                      className="size-4 animate-spin"
+                      strokeWidth={2.5}
+                    />
                     <span>Generating...</span>
                   </>
                 ) : (
                   <>
-                    <Sparkles className="size-4" strokeWidth={2.5} fill="currentColor" />
+                    <Sparkles
+                      className="size-4"
+                      strokeWidth={2.5}
+                      fill="currentColor"
+                    />
                     <span>
                       {canGenerate
-                        ? "Generate Hairstyle · 1 credit"
-                        : isUploading
-                          ? "Uploading photo..."
-                          : "Select photo & style"}
+                        ? `Generate Hairstyle · ${FLAT_COST} credit`
+                        : creditLock
+                          ? "Not enough credits"
+                          : isUploading
+                            ? "Uploading photo..."
+                            : "Select photo & style"}
                     </span>
                   </>
                 )}
@@ -381,6 +520,12 @@ export default function HairStudioPage() {
             />
           </div>
         </div>
+
+        {/* RECENT CREATIONS */}
+        <RecentSection
+          creations={recentCreations}
+          onViewAll={() => router.push("/app/history")}
+        />
       </div>
 
       {/* GENERATING OVERLAY */}
@@ -396,7 +541,11 @@ export default function HairStudioPage() {
               <div className="relative">
                 <motion.div
                   animate={{ scale: [1, 1.15, 1], opacity: [0.6, 1, 0.6] }}
-                  transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                  transition={{
+                    duration: 2,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                  }}
                   className="absolute inset-0 rounded-full bg-[#D99A5B]/30 blur-2xl"
                 />
                 <div
@@ -406,7 +555,11 @@ export default function HairStudioPage() {
                     "shadow-[0_20px_60px_rgba(217,154,91,0.6)]"
                   )}
                 >
-                  <Sparkles className="size-9 animate-pulse text-white" strokeWidth={2} fill="currentColor" />
+                  <Sparkles
+                    className="size-9 animate-pulse text-white"
+                    strokeWidth={2}
+                    fill="currentColor"
+                  />
                 </div>
               </div>
 
@@ -487,7 +640,10 @@ export default function HairStudioPage() {
                     "backdrop-blur-sm"
                   )}
                 >
-                  <CheckCircle2 className="size-3.5 text-[#4CAF50]" strokeWidth={3} />
+                  <CheckCircle2
+                    className="size-3.5 text-[#4CAF50]"
+                    strokeWidth={3}
+                  />
                   <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#7ED881]">
                     Your new look is ready
                   </span>
@@ -520,7 +676,10 @@ export default function HairStudioPage() {
                 >
                   {isDownloading ? (
                     <>
-                      <Loader2 className="size-4 animate-spin" strokeWidth={2.5} />
+                      <Loader2
+                        className="size-4 animate-spin"
+                        strokeWidth={2.5}
+                      />
                       <span>Downloading...</span>
                     </>
                   ) : (
@@ -554,7 +713,7 @@ export default function HairStudioPage() {
               </div>
 
               <p className="mt-3 text-center text-[11px] font-medium text-white/50">
-                Saved to your history · 1 credit used
+                Saved to your history · {FLAT_COST} credit used
               </p>
             </motion.div>
           </motion.div>
@@ -614,7 +773,7 @@ function StepCard({
 }
 
 // ═══════════════════════════════════════════
-// PHOTO UPLOAD ZONE — WITH GUIDANCE
+// PHOTO UPLOAD ZONE — WITH GUIDANCE + LOCK
 // ═══════════════════════════════════════════
 
 function PhotoUploadZone({
@@ -624,6 +783,7 @@ function PhotoUploadZone({
   uploadSuccess,
   uploadError,
   uploadedSize,
+  disabled,
   onFileSelect,
   onRemove,
 }: {
@@ -633,6 +793,7 @@ function PhotoUploadZone({
   uploadSuccess: boolean;
   uploadError: string | null;
   uploadedSize: number | null;
+  disabled: boolean;
   onFileSelect: (file: File) => void;
   onRemove: () => void;
 }) {
@@ -640,6 +801,7 @@ function PhotoUploadZone({
   const [isDragging, setIsDragging] = React.useState(false);
 
   const handleDragOver = (e: React.DragEvent) => {
+    if (disabled) return;
     e.preventDefault();
     setIsDragging(true);
   };
@@ -647,6 +809,7 @@ function PhotoUploadZone({
   const handleDragLeave = () => setIsDragging(false);
 
   const handleDrop = (e: React.DragEvent) => {
+    if (disabled) return;
     e.preventDefault();
     setIsDragging(false);
     const droppedFile = e.dataTransfer.files?.[0];
@@ -655,7 +818,10 @@ function PhotoUploadZone({
     }
   };
 
-  const handleClick = () => inputRef.current?.click();
+  const handleClick = () => {
+    if (disabled) return;
+    inputRef.current?.click();
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -678,6 +844,7 @@ function PhotoUploadZone({
           accept="image/jpeg,image/png,image/webp,image/heic"
           onChange={handleChange}
           className="hidden"
+          disabled={disabled}
         />
 
         <div
@@ -687,21 +854,24 @@ function PhotoUploadZone({
           onDrop={handleDrop}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => e.key === "Enter" && handleClick()}
+          onKeyDown={(e) =>
+            e.key === "Enter" && !disabled && inputRef.current?.click()
+          }
+          aria-disabled={disabled}
           className={cn(
-            "group flex cursor-pointer flex-col items-center justify-center gap-3",
-            "rounded-2xl border-2 border-dashed p-5 sm:p-6 text-center",
+            "group flex flex-col items-center justify-center gap-3",
+            "rounded-2xl border-2 border-dashed p-5 text-center sm:p-6",
             "transition-all duration-300",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D18A4A]",
-            isDragging
+            disabled
               ? [
-                  "border-[#D18A4A] bg-[#FDF4EB]/60",
-                  "dark:border-[#D99A5B] dark:bg-[#33312D]/60",
+                  "cursor-not-allowed border-[#E5E0D5] bg-[#F7F7F2]/60 opacity-70",
+                  "dark:border-[#4A473F] dark:bg-[#1A1918]/60",
                 ]
               : [
-                  "border-[#D18A4A]/40 bg-transparent",
-                  "hover:border-[#D18A4A] hover:bg-[#FDF4EB]/40",
-                  "dark:border-[#D99A5B]/40 dark:hover:border-[#D99A5B] dark:hover:bg-[#33312D]/40",
+                  isDragging
+                    ? "border-[#D18A4A] bg-[#FDF4EB]/60 dark:border-[#D99A5B] dark:bg-[#33312D]/60"
+                    : "cursor-pointer border-[#D18A4A]/40 bg-transparent hover:border-[#D18A4A] hover:bg-[#FDF4EB]/40 dark:border-[#D99A5B]/40 dark:hover:border-[#D99A5B] dark:hover:bg-[#33312D]/40",
                 ]
           )}
         >
@@ -711,62 +881,72 @@ function PhotoUploadZone({
               "bg-[#FDF4EB] text-[#D18A4A]",
               "dark:bg-[#33312D] dark:text-[#D99A5B]",
               "transition-transform duration-300",
-              "group-hover:scale-110"
+              !disabled && "group-hover:scale-110"
             )}
           >
-            <Upload className="size-5" strokeWidth={2.5} />
+            {disabled ? (
+              <Lock className="size-5" strokeWidth={2.5} />
+            ) : (
+              <Upload className="size-5" strokeWidth={2.5} />
+            )}
           </div>
 
           <div className="flex flex-col gap-1">
             <p className="text-[14px] font-bold tracking-tight text-[#2E2A24] dark:text-[#F7F5F0]">
-              Upload your photo
+              {disabled ? "Upload locked" : "Upload your photo"}
             </p>
             <p className="text-[12px] font-medium text-[#8B8478] dark:text-[#B5B0A5]">
-              Drag and drop or click to browse
+              {disabled
+                ? "Add credits to unlock uploads"
+                : "Drag and drop or click to browse"}
             </p>
           </div>
 
-          <p
-            className={cn(
-              "text-[10.5px] font-semibold uppercase tracking-[0.1em]",
-              "text-[#8B8478]/70 dark:text-[#B5B0A5]/70"
-            )}
-          >
-            JPG · PNG · HEIC · Max 10MB
-          </p>
+          {!disabled && (
+            <>
+              <p
+                className={cn(
+                  "text-[10.5px] font-semibold uppercase tracking-[0.1em]",
+                  "text-[#8B8478]/70 dark:text-[#B5B0A5]/70"
+                )}
+              >
+                JPG · PNG · HEIC · Max 10MB
+              </p>
 
-          {/* 🆕 Best Results guidance */}
-          <div
-            className={cn(
-              "mt-2 w-full max-w-[280px] rounded-xl border p-2.5 text-left",
-              "border-[#D18A4A]/20 bg-[#FDF4EB]/40",
-              "dark:border-[#D99A5B]/20 dark:bg-[#33312D]/40"
-            )}
-          >
-            <p className="flex items-center gap-1.5 text-[10.5px] font-bold text-[#D18A4A] dark:text-[#D99A5B]">
-              <Sparkles className="size-3" strokeWidth={2.5} />
-              Best Results
-            </p>
-            <ul className="mt-1.5 flex flex-col gap-0.5 text-[10px] leading-relaxed text-[#8B8478] dark:text-[#B5B0A5]">
-              <li>• Use a clear, front-facing selfie</li>
-              <li>• Good lighting (no shadows on face)</li>
-              <li>• No screenshots or heavily filtered photos</li>
-            </ul>
-          </div>
+              {/* Best Results guidance */}
+              <div
+                className={cn(
+                  "mt-2 w-full max-w-[280px] rounded-xl border p-2.5 text-left",
+                  "border-[#D18A4A]/20 bg-[#FDF4EB]/40",
+                  "dark:border-[#D99A5B]/20 dark:bg-[#33312D]/40"
+                )}
+              >
+                <p className="flex items-center gap-1.5 text-[10.5px] font-bold text-[#D18A4A] dark:text-[#D99A5B]">
+                  <Sparkles className="size-3" strokeWidth={2.5} />
+                  Best Results
+                </p>
+                <ul className="mt-1.5 flex flex-col gap-0.5 text-[10px] leading-relaxed text-[#8B8478] dark:text-[#B5B0A5]">
+                  <li>• Use a clear, front-facing selfie</li>
+                  <li>• Good lighting (no shadows on face)</li>
+                  <li>• No screenshots or heavily filtered photos</li>
+                </ul>
+              </div>
 
-          <div
-            className={cn(
-              "mt-1 inline-flex items-center gap-1.5 rounded-full px-4 py-2",
-              "bg-[#FDF4EB] text-[#D18A4A]",
-              "dark:bg-[#33312D] dark:text-[#D99A5B]",
-              "text-[12px] font-bold",
-              "transition-all duration-300",
-              "group-hover:shadow-[0_4px_12px_rgba(217,154,91,0.25)]"
-            )}
-          >
-            <ImageIcon className="size-3.5" strokeWidth={2.5} />
-            <span>Choose Photo</span>
-          </div>
+              <div
+                className={cn(
+                  "mt-1 inline-flex items-center gap-1.5 rounded-full px-4 py-2",
+                  "bg-[#FDF4EB] text-[#D18A4A]",
+                  "dark:bg-[#33312D] dark:text-[#D99A5B]",
+                  "text-[12px] font-bold",
+                  "transition-all duration-300",
+                  "group-hover:shadow-[0_4px_12px_rgba(217,154,91,0.25)]"
+                )}
+              >
+                <ImageIcon className="size-3.5" strokeWidth={2.5} />
+                <span>Choose Photo</span>
+              </div>
+            </>
+          )}
         </div>
       </>
     );
@@ -784,7 +964,6 @@ function PhotoUploadZone({
         "bg-[#FCFBF7] dark:bg-[#262421]"
       )}
     >
-      {/* 🔒 Compact fixed-height container — NEVER stretches */}
       <div
         className={cn(
           "relative w-full flex items-center justify-center overflow-hidden",
@@ -802,7 +981,6 @@ function PhotoUploadZone({
           style={{ width: "auto", height: "auto" }}
         />
 
-        {/* UPLOADING OVERLAY */}
         <AnimatePresence>
           {isUploading && (
             <motion.div
@@ -821,14 +999,16 @@ function PhotoUploadZone({
                   "shadow-[0_8px_24px_rgba(217,154,91,0.6)]"
                 )}
               >
-                <Loader2 className="size-5 animate-spin text-white" strokeWidth={2.5} />
+                <Loader2
+                  className="size-5 animate-spin text-white"
+                  strokeWidth={2.5}
+                />
               </div>
               <p className="text-[11px] font-bold text-white">Uploading...</p>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* SUCCESS BADGE */}
         <AnimatePresence>
           {uploadSuccess && !isUploading && (
             <motion.div
@@ -844,13 +1024,15 @@ function PhotoUploadZone({
                   "shadow-[0_4px_16px_rgba(76,175,80,0.5)]"
                 )}
               >
-                <CheckCircle2 className="size-3.5 text-white" strokeWidth={3} />
+                <CheckCircle2
+                  className="size-3.5 text-white"
+                  strokeWidth={3}
+                />
               </div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* REMOVE BUTTON */}
         <button
           type="button"
           onClick={onRemove}
@@ -869,7 +1051,6 @@ function PhotoUploadZone({
         </button>
       </div>
 
-      {/* Compact info bar */}
       <div
         className={cn(
           "flex items-center justify-between gap-2 border-t px-3 py-2",
@@ -933,5 +1114,141 @@ function PhotoUploadZone({
         </div>
       </div>
     </motion.div>
+  );
+}
+
+// ═══════════════════════════════════════════
+// RECENT CREATIONS — click image to download
+// ═══════════════════════════════════════════
+
+function RecentSection({
+  creations,
+  onViewAll,
+}: {
+  creations: CreationItem[];
+  onViewAll: () => void;
+}) {
+  const [downloadingId, setDownloadingId] = React.useState<string | null>(null);
+
+  if (creations.length === 0) return null;
+
+  const handleDownloadCreation = async (c: CreationItem) => {
+    const url = c.imageUrl;
+    if (!url) return;
+
+    setDownloadingId(c.id);
+
+    const ext = url.match(/\.(png|jpg|jpeg|webp)(\?|$)/i)?.[1] || "jpg";
+    const filename = `lexa-hairstyle-${Date.now()}.${ext}`;
+
+    await downloadImage(url, filename);
+    setDownloadingId(null);
+  };
+
+  return (
+    <div className="mt-10">
+      <div className="mb-4 flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-[18px] font-extrabold tracking-tight text-[#2E2A24] dark:text-[#F7F5F0] sm:text-[20px]">
+            Recent Hair Creations
+          </h2>
+          <p className="mt-0.5 text-[11.5px] font-medium text-[#8B8478] dark:text-[#B5B0A5]">
+            Tap an image to download
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onViewAll}
+          className="inline-flex shrink-0 items-center gap-1 text-[12px] font-bold text-[#D18A4A] transition-colors hover:text-[#B86F32] dark:text-[#D99A5B]"
+        >
+          View all <ArrowRight className="size-3.5" strokeWidth={2.5} />
+        </button>
+      </div>
+
+      <div
+        className="flex gap-3 overflow-x-auto pb-2"
+        style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+      >
+        {creations.map((c) => {
+          const url = c.imageUrl;
+          if (!url) return null;
+
+          const isDownloading = downloadingId === c.id;
+
+          return (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => handleDownloadCreation(c)}
+              disabled={isDownloading}
+              aria-label="Download this hair creation"
+              className={cn(
+                "group flex w-[150px] shrink-0 flex-col rounded-2xl border p-2 text-left sm:w-[170px]",
+                "border-[#E5E0D5] bg-[#FCFBF7]",
+                "dark:border-[#4A473F] dark:bg-[#262421]",
+                "transition-all duration-300 hover:-translate-y-0.5",
+                "hover:border-[#D18A4A]/50 hover:shadow-[0_8px_20px_rgba(217,154,91,0.12)]",
+                "dark:hover:border-[#D99A5B]/50",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D18A4A]",
+                "disabled:cursor-not-allowed"
+              )}
+            >
+              <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-[#F7F7F2] dark:bg-[#1A1918]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={url}
+                  alt="Hair creation"
+                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  draggable={false}
+                  loading="lazy"
+                />
+
+                <div
+                  className={cn(
+                    "pointer-events-none absolute inset-0 flex items-center justify-center",
+                    "bg-black/40 opacity-0 backdrop-blur-[1px]",
+                    "transition-opacity duration-300 group-hover:opacity-100"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "flex size-9 items-center justify-center rounded-full",
+                      "bg-gradient-to-br from-[#D99A5B] to-[#B86F32] text-white",
+                      "shadow-[0_8px_20px_rgba(0,0,0,0.4)]"
+                    )}
+                  >
+                    {isDownloading ? (
+                      <Loader2
+                        className="size-4 animate-spin"
+                        strokeWidth={2.5}
+                      />
+                    ) : (
+                      <Download className="size-4" strokeWidth={2.5} />
+                    )}
+                  </span>
+                </div>
+
+                {isDownloading && (
+                  <div className="absolute right-2 top-2 flex size-6 items-center justify-center rounded-full bg-black/70 text-white backdrop-blur-md">
+                    <Loader2 className="size-3 animate-spin" strokeWidth={3} />
+                  </div>
+                )}
+              </div>
+              <div className="mt-2 px-0.5">
+                <p className="text-[10px] font-bold text-[#2E2A24] dark:text-[#F7F5F0]">
+                  {new Date(c.createdAt).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </p>
+                <p className="truncate text-[9.5px] font-medium text-[#8B8478] dark:text-[#B5B0A5]">
+                  Hairstyle
+                </p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
