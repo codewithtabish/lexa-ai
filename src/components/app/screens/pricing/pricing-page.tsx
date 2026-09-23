@@ -1,3 +1,4 @@
+// src/app/pricing/page.tsx
 "use client";
 
 import * as React from "react";
@@ -20,16 +21,20 @@ import {
   Briefcase,
   Plus,
   Minus,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { createCheckout } from "@/actions/billing/create-checkout";
+import type { PlanId } from "@/data/plans";
 
 // ============================================
 // DATA
 // ============================================
 
 interface Plan {
-  id: "basic" | "pro";
+  id: PlanId;
   name: string;
   price: number;
   description: string;
@@ -40,14 +45,14 @@ interface Plan {
 
 const PLANS: Plan[] = [
   {
-    id: "basic",
+    id: "BASIC",
     name: "Basic",
     price: 4.99,
-    description: "Perfect for casual users",
+    description: "Perfect for regular creators",
     icon: Zap,
     features: [
-      "20 AI credits per month",
-      "All 6 AI features",
+      "40 AI credits per month",
+      "All AI tools",
       "Unlimited image generation",
       "No watermark",
       "Standard processing speed",
@@ -55,15 +60,15 @@ const PLANS: Plan[] = [
     ],
   },
   {
-    id: "pro",
+    id: "PRO",
     name: "Pro",
     price: 7.99,
     description: "Best for creators & power users",
     icon: Crown,
     popular: true,
     features: [
-      "40 AI credits per month",
-      "All 6 AI features",
+      "80 AI credits per month",
+      "All AI tools",
       "Unlimited image generation",
       "No watermark",
       "⚡ Lightning-fast processing",
@@ -77,15 +82,14 @@ const PLANS: Plan[] = [
 const INCLUDED_FEATURES = [
   {
     icon: Bot,
-    title: "All 6 AI Features",
+    title: "All AI Tools",
     description:
       "Hairstyles, beards, outfits, age, colors, and AI generation.",
   },
   {
     icon: ImageIcon,
     title: "Unlimited Image Gen",
-    description:
-      "Create as many AI images as you want — completely free.",
+    description: "Create as many AI images as you want.",
   },
   {
     icon: Sparkles,
@@ -107,8 +111,7 @@ const INCLUDED_FEATURES = [
   {
     icon: Download,
     title: "High-Res Download",
-    description:
-      "Save and share your results in full resolution.",
+    description: "Save and share your results in full resolution.",
   },
 ];
 
@@ -116,16 +119,15 @@ interface CreditRow {
   feature: string;
   credits: string;
   bestFor: string;
-  isFree?: boolean;
 }
 
 const CREDIT_ROWS: CreditRow[] = [
-  { feature: "Hairstyles", credits: "5 credits", bestFor: "New looks & style" },
-  { feature: "Beard Styles", credits: "5 credits", bestFor: "Facial hair makeover" },
-  { feature: "Outfits", credits: "10 credits", bestFor: "Fashion & style" },
-  { feature: "Age Transformations", credits: "10 credits", bestFor: "See your future self" },
-  { feature: "Hair Colors", credits: "5 credits", bestFor: "Try new shades" },
-  { feature: "AI Image Generation", credits: "Free", bestFor: "Creative freedom", isFree: true },
+  { feature: "Hairstyles", credits: "1 credit", bestFor: "New looks & style" },
+  { feature: "Beard Styles", credits: "1 credit", bestFor: "Facial hair makeover" },
+  { feature: "Outfits", credits: "1 credit", bestFor: "Fashion & style" },
+  { feature: "Age Transformations", credits: "2 credits", bestFor: "See your future self" },
+  { feature: "Hair Colors", credits: "1 credit", bestFor: "Try new shades" },
+  { feature: "AI Image Generation", credits: "1 credit", bestFor: "Creative freedom" },
 ];
 
 const WHY_PRO = [
@@ -133,7 +135,7 @@ const WHY_PRO = [
     icon: Zap,
     title: "Double the Credits",
     description:
-      "40 credits per month instead of 20 — double the transformations.",
+      "80 credits per month instead of 40 — double the transformations.",
   },
   {
     icon: Rocket,
@@ -162,8 +164,8 @@ interface ComparisonRow {
 }
 
 const COMPARISON: ComparisonRow[] = [
-  { feature: "Monthly credits", basic: "20", pro: "40" },
-  { feature: "Access to all 6 AI features", basic: true, pro: true },
+  { feature: "Monthly credits", basic: "40", pro: "80" },
+  { feature: "Access to all AI tools", basic: true, pro: true },
   { feature: "Unlimited image generation", basic: true, pro: true },
   { feature: "No watermark", basic: true, pro: true },
   { feature: "Processing speed", basic: "Standard", pro: "⚡ Lightning" },
@@ -181,7 +183,7 @@ interface FaqItem {
 const FAQS: FaqItem[] = [
   {
     q: "What's the difference between Basic and Pro?",
-    a: "Pro gives you more credits, faster processing, priority support, early access to new features, and commercial usage rights. Basic is perfect for casual users who want to try the core features.",
+    a: "Pro gives you 80 credits per month (vs 40), faster processing, priority support, early access to new features, and commercial usage rights. Basic is perfect for regular users who want the core features.",
   },
   {
     q: "Do unused credits roll over to next month?",
@@ -193,7 +195,7 @@ const FAQS: FaqItem[] = [
   },
   {
     q: "What payment methods do you accept?",
-    a: "We accept all major credit and debit cards, plus local Pakistani payment methods (JazzCash, EasyPaisa) via Safepay.",
+    a: "We accept all major international credit and debit cards (Visa, Mastercard), plus local Pakistani payment methods via Safepay — including Raast.",
   },
   {
     q: "Is there a free trial?",
@@ -262,7 +264,7 @@ function GetStartedButton({
 
   if (isLoaded && isSignedIn) {
     return (
-      <Link href="/app/pricing" className={baseClass}>
+      <Link href="/app" className={baseClass}>
         {children}
         <ArrowRight
           className="size-3.5 transition-transform duration-300 group-hover/btn:translate-x-0.5"
@@ -402,7 +404,31 @@ function PricingHero() {
 
 function PricingCard({ plan }: { plan: Plan }) {
   const { isSignedIn, isLoaded } = useUser();
+  const [isLoading, setIsLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
   const Icon = plan.icon;
+
+  const handleSubscribe = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const result = await createCheckout(plan.id);
+
+      if (result.success) {
+        // ✅ Redirect to Safepay checkout
+        window.location.href = result.checkoutUrl;
+        // Don't reset isLoading — the page is navigating away
+      } else {
+        setError(result.error);
+        setIsLoading(false);
+      }
+    } catch (err) {
+      console.error("[PricingCard] Checkout error:", err);
+      setError("Could not start checkout. Please try again.");
+      setIsLoading(false);
+    }
+  };
 
   // -------------------------------------------------
   // CTA class
@@ -411,9 +437,12 @@ function PricingCard({ plan }: { plan: Plan }) {
     "group/btn inline-flex h-11 w-full cursor-pointer items-center justify-center gap-2",
     "rounded-full text-sm font-semibold sm:text-base",
     "no-underline",
+    "transition-all duration-300",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
     plan.popular
-      ? "bg-linear-to-r from-primary to-primary/80 text-primary-foreground shadow-lg shadow-primary/30 transition-all duration-300 hover:shadow-xl hover:shadow-primary/40"
-      : "border border-primary/40 bg-transparent text-primary transition-colors duration-200 hover:border-primary hover:bg-primary/5",
+      ? "bg-linear-to-r from-primary to-primary/80 text-primary-foreground shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40"
+      : "border border-primary/40 bg-transparent text-primary hover:border-primary hover:bg-primary/5",
+    isLoading && "cursor-wait opacity-80",
   );
 
   const inner = (
@@ -425,7 +454,11 @@ function PricingCard({ plan }: { plan: Plan }) {
             initial={{ opacity: 0, y: -10, scale: 0.9 }}
             whileInView={{ opacity: 1, y: 0, scale: 1 }}
             viewport={{ once: true }}
-            transition={{ delay: 0.4, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+            transition={{
+              delay: 0.4,
+              duration: 0.5,
+              ease: [0.22, 1, 0.36, 1],
+            }}
             className={cn(
               "flex items-center gap-1.5 rounded-full",
               "bg-linear-to-r from-primary to-primary/80",
@@ -520,26 +553,66 @@ function PricingCard({ plan }: { plan: Plan }) {
 
       {/* CTA */}
       <div className="mt-auto">
-        {isLoaded && isSignedIn ? (
-          // ── Signed in → /app/pricing ──
-          <Link href={`/app/pricing?plan=${plan.id}`} className={ctaClass}>
-            Get {plan.name}
-            <ArrowRight
-              className="size-3.5 transition-transform duration-300 group-hover/btn:translate-x-0.5"
-              strokeWidth={2.5}
-            />
-          </Link>
+        {!isLoaded ? (
+          // ── Clerk still loading ──
+          <button type="button" className={ctaClass} disabled>
+            <Loader2 className="size-4 animate-spin" strokeWidth={2.5} />
+          </button>
+        ) : isSignedIn ? (
+          // ── Signed in → start real checkout ──
+          <button
+            type="button"
+            onClick={handleSubscribe}
+            disabled={isLoading}
+            className={ctaClass}
+          >
+            {isLoading ? (
+              <>
+                <Loader2
+                  className="size-4 animate-spin"
+                  strokeWidth={2.5}
+                />
+                <span>Redirecting to Safepay...</span>
+              </>
+            ) : (
+              <>
+                <span>Get {plan.name}</span>
+                <ArrowRight
+                  className="size-3.5 transition-transform duration-300 group-hover/btn:translate-x-0.5"
+                  strokeWidth={2.5}
+                />
+              </>
+            )}
+          </button>
         ) : (
-          // ── Guest → Clerk modal ──
+          // ── Guest → Clerk sign-up modal ──
           <SignUpButton mode="modal">
             <button type="button" className={ctaClass}>
-              Get {plan.name}
+              <span>Get {plan.name}</span>
               <ArrowRight
                 className="size-3.5 transition-transform duration-300 group-hover/btn:translate-x-0.5"
                 strokeWidth={2.5}
               />
             </button>
           </SignUpButton>
+        )}
+
+        {/* Inline error */}
+        {error && (
+          <div
+            className={cn(
+              "mt-2.5 flex items-start gap-1.5 rounded-lg px-3 py-2",
+              "border border-destructive/30 bg-destructive/5",
+            )}
+          >
+            <AlertCircle
+              className="mt-0.5 size-3.5 shrink-0 text-destructive"
+              strokeWidth={2.5}
+            />
+            <span className="text-[11.5px] leading-snug text-destructive">
+              {error}
+            </span>
+          </div>
         )}
       </div>
 
@@ -739,8 +812,7 @@ function CreditsSimplified() {
               variants={itemVariants}
               className="text-sm text-muted-foreground sm:text-[15px]"
             >
-              Each AI transformation uses a few credits. Image generation is
-              always free.
+              Each AI transformation uses just a few credits.
             </motion.p>
           </div>
 
@@ -777,20 +849,12 @@ function CreditsSimplified() {
                     "px-4 py-3 transition-colors duration-200",
                     "hover:bg-primary/5",
                     "sm:px-6 sm:py-3.5",
-                    row.isFree && "bg-primary/5",
                   )}
                 >
                   <span className="truncate text-[12px] font-semibold text-foreground sm:text-[13px]">
                     {row.feature}
                   </span>
-                  <span
-                    className={cn(
-                      "text-[12px] font-semibold sm:text-[13px]",
-                      row.isFree
-                        ? "bg-linear-to-r from-primary to-primary/70 bg-clip-text text-transparent"
-                        : "text-foreground",
-                    )}
-                  >
+                  <span className="text-[12px] font-semibold text-foreground sm:text-[13px]">
                     {row.credits}
                   </span>
                   <span className="text-[12px] text-muted-foreground sm:text-[13px]">
@@ -1186,6 +1250,16 @@ function RiskFree() {
     "no-underline",
   );
 
+  // When signed in, scroll to plans (so they can subscribe)
+  const handleUpgrade = () => {
+    const plansEl = document.getElementById("pricing-plans");
+    if (plansEl) {
+      plansEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
   return (
     <section className="relative w-full py-12 sm:py-14 lg:py-16">
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
@@ -1234,14 +1308,18 @@ function RiskFree() {
             variants={itemVariants}
             className="mt-2 flex flex-col gap-3 sm:flex-row"
           >
-            {isLoaded && isSignedIn ? (
-              <Link href="/app/pricing" className={btnClass}>
+            {!isLoaded ? (
+              <button type="button" className={btnClass} disabled>
+                <Loader2 className="size-4 animate-spin" strokeWidth={2.5} />
+              </button>
+            ) : isSignedIn ? (
+              <button type="button" onClick={handleUpgrade} className={btnClass}>
                 Upgrade Now
                 <ArrowRight
                   className="size-3.5 transition-transform duration-300 group-hover/btn:translate-x-0.5"
                   strokeWidth={2.5}
                 />
-              </Link>
+              </button>
             ) : (
               <SignUpButton mode="modal">
                 <button type="button" className={btnClass}>
@@ -1282,7 +1360,12 @@ export default function PricingPage() {
   return (
     <div className="flex flex-1 flex-col">
       <PricingHero />
-      <PricingCards />
+
+      {/* Anchor target so RiskFree's "Upgrade Now" can scroll here */}
+      <div id="pricing-plans" className="scroll-mt-24">
+        <PricingCards />
+      </div>
+
       <BothPlansComeWith />
       <CreditsSimplified />
       <WhyGoPro />
